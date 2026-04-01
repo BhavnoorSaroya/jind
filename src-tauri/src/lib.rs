@@ -189,18 +189,18 @@ struct SelectedCameraView {
 impl SharedState {
     fn new() -> Self {
         let app = Arc::new_cyclic(|weak| SharedApp {
-                inner: Mutex::new(AppInner {
-                    session: None,
-                    selected_camera: None,
-                    preview: None,
-                    busy_detail: None,
-                    last_result: None,
-                    close_requested: false,
-                    shutdown_started: false,
-                }),
-                operation_lock: AsyncMutex::new(()),
-                media_server: MediaServer::new(weak.clone()),
-            });
+            inner: Mutex::new(AppInner {
+                session: None,
+                selected_camera: None,
+                preview: None,
+                busy_detail: None,
+                last_result: None,
+                close_requested: false,
+                shutdown_started: false,
+            }),
+            operation_lock: AsyncMutex::new(()),
+            media_server: MediaServer::new(weak.clone()),
+        });
 
         Self { app }
     }
@@ -585,12 +585,7 @@ fn autoselect_first_camera(shared: Arc<SharedApp>, app: &AppHandle) {
         return;
     };
 
-    let _ = select_camera_impl(
-        shared,
-        app,
-        device.device_id.clone(),
-        mode.id.clone(),
-    );
+    let _ = select_camera_impl(shared, app, device.device_id.clone(), mode.id.clone());
 }
 
 fn capture_frame_impl(shared: Arc<SharedApp>, app: &AppHandle) -> Result<()> {
@@ -714,7 +709,9 @@ fn reorder_frames_impl(shared: Arc<SharedApp>, frame_ids_in_order: Vec<u64>) -> 
         }
 
         if !frame_map.is_empty() {
-            return Err(anyhow!("Timeline reorder payload is missing existing frames."));
+            return Err(anyhow!(
+                "Timeline reorder payload is missing existing frames."
+            ));
         }
 
         session.manifest.frames = reordered;
@@ -741,7 +738,13 @@ fn export_mp4_impl(shared: Arc<SharedApp>, export_path: PathBuf) -> Result<()> {
 
     let workspace_session = {
         let inner = shared.inner.lock().unwrap();
-        inner.session.as_ref().unwrap().workspace.path().to_path_buf()
+        inner
+            .session
+            .as_ref()
+            .unwrap()
+            .workspace
+            .path()
+            .to_path_buf()
     };
     let manifest = {
         let inner = shared.inner.lock().unwrap();
@@ -830,11 +833,19 @@ fn unpack_project(project_path: &Path) -> Result<ProjectSession> {
         let frame_path = workspace.path().join(&frame.image_path);
         let thumb_path = workspace.path().join(&frame.thumb_path);
         if !frame_path.exists() || !thumb_path.exists() {
-            return Err(anyhow!("project archive is missing one or more frame assets"));
+            return Err(anyhow!(
+                "project archive is missing one or more frame assets"
+            ));
         }
     }
 
-    let next_frame_id = manifest.frames.iter().map(|frame| frame.id).max().unwrap_or(0) + 1;
+    let next_frame_id = manifest
+        .frames
+        .iter()
+        .map(|frame| frame.id)
+        .max()
+        .unwrap_or(0)
+        + 1;
     Ok(ProjectSession {
         project_path: project_path.to_path_buf(),
         workspace,
@@ -861,8 +872,18 @@ fn write_archive(session: &ProjectSession) -> Result<()> {
     writer.write_all(serde_json::to_string_pretty(&session.manifest)?.as_bytes())?;
 
     for frame in &session.manifest.frames {
-        add_file_to_archive(&mut writer, session.workspace.path(), &frame.image_path, options)?;
-        add_file_to_archive(&mut writer, session.workspace.path(), &frame.thumb_path, options)?;
+        add_file_to_archive(
+            &mut writer,
+            session.workspace.path(),
+            &frame.image_path,
+            options,
+        )?;
+        add_file_to_archive(
+            &mut writer,
+            session.workspace.path(),
+            &frame.thumb_path,
+            options,
+        )?;
     }
 
     writer.finish()?;
@@ -933,7 +954,11 @@ fn enumerate_cameras() -> Result<Vec<CameraDeviceView>> {
                     FrameSizeEnum::Discrete(size) => {
                         let mode = CameraMode {
                             id: camera_mode_id(&path, format.fourcc, size.width, size.height),
-                            label: format!("{width}x{height} {pixel_format}", width = size.width, height = size.height),
+                            label: format!(
+                                "{width}x{height} {pixel_format}",
+                                width = size.width,
+                                height = size.height
+                            ),
                             width: size.width,
                             height: size.height,
                             pixel_format: pixel_format.clone(),
@@ -1027,7 +1052,11 @@ fn pixel_format_rank(pixel_format: &str) -> u8 {
     }
 }
 
-fn start_preview_worker(shared: Arc<SharedApp>, app: AppHandle, selected: SelectedCamera) -> PreviewWorker {
+fn start_preview_worker(
+    shared: Arc<SharedApp>,
+    app: AppHandle,
+    selected: SelectedCamera,
+) -> PreviewWorker {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_signal = stop.clone();
     let latest_frame = Arc::new(Mutex::new(None));
@@ -1038,10 +1067,13 @@ fn start_preview_worker(shared: Arc<SharedApp>, app: AppHandle, selected: Select
             let device = Device::with_path(&selected.device_id)
                 .with_context(|| format!("failed to open {}", selected.device_id))?;
             let requested = Format::new(selected.mode.width, selected.mode.height, fourcc);
-            let actual = device.set_format(&requested).context("failed to set camera format")?;
-            let mut stream =
-                MmapStream::with_buffers(&device, Type::VideoCapture, 4).context("failed to start camera stream")?;
-            let preview_is_passthrough = matches!(actual.fourcc.str().unwrap_or_default(), "MJPG" | "JPEG");
+            let actual = device
+                .set_format(&requested)
+                .context("failed to set camera format")?;
+            let mut stream = MmapStream::with_buffers(&device, Type::VideoCapture, 4)
+                .context("failed to start camera stream")?;
+            let preview_is_passthrough =
+                matches!(actual.fourcc.str().unwrap_or_default(), "MJPG" | "JPEG");
             let mut last_emit = Instant::now() - Duration::from_millis(PREVIEW_INTERVAL_MS);
 
             while !stop_signal.load(Ordering::Relaxed) {
@@ -1208,9 +1240,10 @@ fn build_snapshot(inner: &AppInner, media_base_url: Option<&str>) -> Result<AppS
         status: build_status(inner),
         selected_camera: inner.selected_camera.as_ref().map(selected_camera_view),
         ffmpeg_available: ffmpeg_is_available(),
-        preview_url: inner.selected_camera.as_ref().and_then(|_| {
-            media_base_url.map(|base_url| format!("{base_url}/preview.mjpg"))
-        }),
+        preview_url: inner
+            .selected_camera
+            .as_ref()
+            .and_then(|_| media_base_url.map(|base_url| format!("{base_url}/preview.mjpg"))),
     })
 }
 
@@ -1299,7 +1332,12 @@ fn parse_frame_request(path: &str) -> Option<(u64, bool)> {
     }
 }
 
-fn serve_frame_asset(stream: &mut TcpStream, shared: &SharedApp, frame_id: u64, thumb: bool) -> Result<()> {
+fn serve_frame_asset(
+    stream: &mut TcpStream,
+    shared: &SharedApp,
+    frame_id: u64,
+    thumb: bool,
+) -> Result<()> {
     let asset_path = {
         let inner = shared.inner.lock().unwrap();
         let session = inner
@@ -1391,7 +1429,12 @@ fn write_http_bytes(
 
 fn write_http_error(stream: &mut TcpStream, code: u16, message: &str) -> Result<()> {
     let body = format!("{message}\n");
-    write_http_bytes(stream, &format!("{code} {message}"), "text/plain; charset=utf-8", body.as_bytes())
+    write_http_bytes(
+        stream,
+        &format!("{code} {message}"),
+        "text/plain; charset=utf-8",
+        body.as_bytes(),
+    )
 }
 
 fn ensure_workspace_dirs(root: &Path) -> Result<()> {
@@ -1407,7 +1450,10 @@ fn validate_relative_path(path: &str) -> Result<()> {
     }
 
     for component in path.components() {
-        if matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)) {
+        if matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
             return Err(anyhow!("project asset path contains invalid traversal"));
         }
     }
@@ -1465,7 +1511,9 @@ fn ensure_ffmpeg_available() -> Result<()> {
     if ffmpeg_is_available() {
         Ok(())
     } else {
-        Err(anyhow!("`ffmpeg` was not found on PATH. Export is unavailable."))
+        Err(anyhow!(
+            "`ffmpeg` was not found on PATH. Export is unavailable."
+        ))
     }
 }
 
@@ -1546,7 +1594,8 @@ mod tests {
 
     #[test]
     fn normalization_letterboxes_to_target_resolution() {
-        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1600, 900, Rgba([255, 0, 0, 255])));
+        let image =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(1600, 900, Rgba([255, 0, 0, 255])));
         let result = normalize_to_resolution(
             &image,
             &ProjectResolution {
@@ -1564,7 +1613,8 @@ mod tests {
         ensure_workspace_dirs(workspace.path()).unwrap();
         let frame_path = workspace.path().join("frames/frame-000001.jpg");
         let thumb_path = workspace.path().join("thumbs/frame-000001.jpg");
-        let pixel = DynamicImage::ImageRgba8(RgbaImage::from_pixel(32, 32, Rgba([0, 128, 255, 255])));
+        let pixel =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(32, 32, Rgba([0, 128, 255, 255])));
         write_jpeg(&frame_path, &pixel, 90).unwrap();
         write_jpeg(&thumb_path, &pixel, 80).unwrap();
 

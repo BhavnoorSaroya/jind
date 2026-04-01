@@ -183,7 +183,11 @@ pub fn app() -> Html {
         let selected_frame_id = selected_frame_id.clone();
         let cameras = cameras.clone();
         use_effect_with(
-            ((*snapshot).project.is_some(), (*snapshot).selected_camera.clone(), (*cameras).clone()),
+            (
+                (*snapshot).project.is_some(),
+                (*snapshot).selected_camera.clone(),
+                (*cameras).clone(),
+            ),
             move |(has_project, selected_camera, available_cameras)| {
                 if *has_project && selected_camera.is_none() {
                     if let Some(first_device) = available_cameras.first() {
@@ -200,7 +204,12 @@ pub fn app() -> Html {
                                 )
                                 .await
                                 {
-                                    sync_snapshot(snapshot, project_cache, selected_frame_id, next_snapshot);
+                                    sync_snapshot(
+                                        snapshot,
+                                        project_cache,
+                                        selected_frame_id,
+                                        next_snapshot,
+                                    );
                                 }
                             });
                         }
@@ -219,30 +228,39 @@ pub fn app() -> Html {
             .project
             .as_ref()
             .or_else(|| (*project_cache).as_ref())
-            .map(|project| project.frames.iter().map(|frame| frame.id).collect::<Vec<_>>())
+            .map(|project| {
+                project
+                    .frames
+                    .iter()
+                    .map(|frame| frame.id)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
-        use_effect_with(((*playing), frame_ids.clone()), move |(is_playing, frame_ids)| {
-            let total_frames = frame_ids.len();
-            let interval = if !*is_playing || total_frames == 0 {
-                None
-            } else {
-                let selected_frame_id = selected_frame_id.clone();
-                let frame_ids = frame_ids.clone();
-                let playback_cursor = playback_cursor.clone();
-                Some(Interval::new(1000 / 15, move || {
-                    let next_index = {
-                        let mut cursor = playback_cursor.borrow_mut();
-                        *cursor = (*cursor + 1) % total_frames.max(1);
-                        *cursor
-                    };
-                    if let Some(frame_id) = frame_ids.get(next_index) {
-                        selected_frame_id.set(Some(*frame_id));
-                    }
-                }))
-            };
+        use_effect_with(
+            ((*playing), frame_ids.clone()),
+            move |(is_playing, frame_ids)| {
+                let total_frames = frame_ids.len();
+                let interval = if !*is_playing || total_frames == 0 {
+                    None
+                } else {
+                    let selected_frame_id = selected_frame_id.clone();
+                    let frame_ids = frame_ids.clone();
+                    let playback_cursor = playback_cursor.clone();
+                    Some(Interval::new(1000 / 15, move || {
+                        let next_index = {
+                            let mut cursor = playback_cursor.borrow_mut();
+                            *cursor = (*cursor + 1) % total_frames.max(1);
+                            *cursor
+                        };
+                        if let Some(frame_id) = frame_ids.get(next_index) {
+                            selected_frame_id.set(Some(*frame_id));
+                        }
+                    }))
+                };
 
-            move || drop(interval)
-        });
+                move || drop(interval)
+            },
+        );
     }
 
     let busy = snapshot.status.busy;
@@ -302,25 +320,34 @@ pub fn app() -> Html {
         .map(|url| format!("{url}?device={current_device_id}&mode={current_mode_id}"));
 
     {
-        use_effect_with((active_selected_frame_id, *live_preview_enabled, *playing), move |(frame_id, live, playing)| {
-            let target_id = if *live && !*playing {
-                Some("timeline-live-proxy".to_string())
-            } else {
-                frame_id.map(|frame_id| format!("timeline-frame-{frame_id}"))
-            };
+        use_effect_with(
+            (active_selected_frame_id, *live_preview_enabled, *playing),
+            move |(frame_id, live, playing)| {
+                let target_id = if *live && !*playing {
+                    Some("timeline-live-proxy".to_string())
+                } else {
+                    frame_id.map(|frame_id| format!("timeline-frame-{frame_id}"))
+                };
 
-            if let Some(target_id) = target_id {
-                scroll_timeline_item_into_view(&target_id);
-            }
-            || {}
-        });
+                if let Some(target_id) = target_id {
+                    scroll_timeline_item_into_view(&target_id);
+                }
+                || {}
+            },
+        );
     }
 
     let status_line = snapshot
         .status
         .detail
         .clone()
-        .or_else(|| snapshot.status.last_result.as_ref().map(|last| last.message.clone()))
+        .or_else(|| {
+            snapshot
+                .status
+                .last_result
+                .as_ref()
+                .map(|last| last.message.clone())
+        })
         .unwrap_or_else(|| {
             if has_project {
                 "Ready.".to_string()
@@ -328,6 +355,34 @@ pub fn app() -> Html {
                 "Create or open a `.jind` project to begin.".to_string()
             }
         });
+
+    let frame_count = current_project
+        .as_ref()
+        .map(|project| project.frames.len())
+        .unwrap_or(0);
+    let resolution_label = current_project
+        .as_ref()
+        .and_then(|project| project.resolution.as_ref())
+        .map(|resolution| format!("{}x{}", resolution.width, resolution.height))
+        .unwrap_or_else(|| "Resolution unlocks on first capture".to_string());
+    let preview_title = if *playing {
+        "Playback stage"
+    } else if *live_preview_enabled {
+        "Live capture stage"
+    } else if active_selected_frame.is_some() {
+        "Frame inspection stage"
+    } else {
+        "Empty stage"
+    };
+    let preview_badge = if busy {
+        "Processing"
+    } else if *playing {
+        "15 FPS"
+    } else if *live_preview_enabled {
+        "Live"
+    } else {
+        "Still"
+    };
 
     let on_create_project = {
         let snapshot = snapshot.clone();
@@ -343,7 +398,8 @@ pub fn app() -> Html {
             let selected_frame_id = selected_frame_id.clone();
             spawn_local(async move {
                 if let Ok(Some(path)) =
-                    invoke_command::<Option<String>, _>("pick_new_project_path", &EmptyArgs {}).await
+                    invoke_command::<Option<String>, _>("pick_new_project_path", &EmptyArgs {})
+                        .await
                 {
                     let mut next_snapshot = if let Ok(next_snapshot) =
                         invoke_command::<AppSnapshot, _>("create_project", &PathArg { path }).await
@@ -354,13 +410,15 @@ pub fn app() -> Html {
                     };
 
                     if let Ok(available_cameras) =
-                        invoke_command::<Vec<CameraDeviceView>, _>("list_cameras", &EmptyArgs {}).await
+                        invoke_command::<Vec<CameraDeviceView>, _>("list_cameras", &EmptyArgs {})
+                            .await
                     {
                         cameras.set(available_cameras.clone());
                         if next_snapshot.selected_camera.is_none() {
                             if let Some(selection) = first_camera_selection(&available_cameras) {
                                 if let Ok(camera_snapshot) =
-                                    invoke_command::<AppSnapshot, _>("select_camera", &selection).await
+                                    invoke_command::<AppSnapshot, _>("select_camera", &selection)
+                                        .await
                                 {
                                     next_snapshot = camera_snapshot;
                                 }
@@ -389,7 +447,8 @@ pub fn app() -> Html {
             let selected_frame_id = selected_frame_id.clone();
             spawn_local(async move {
                 if let Ok(Some(path)) =
-                    invoke_command::<Option<String>, _>("pick_open_project_path", &EmptyArgs {}).await
+                    invoke_command::<Option<String>, _>("pick_open_project_path", &EmptyArgs {})
+                        .await
                 {
                     let mut next_snapshot = if let Ok(next_snapshot) =
                         invoke_command::<AppSnapshot, _>("open_project", &PathArg { path }).await
@@ -400,13 +459,15 @@ pub fn app() -> Html {
                     };
 
                     if let Ok(available_cameras) =
-                        invoke_command::<Vec<CameraDeviceView>, _>("list_cameras", &EmptyArgs {}).await
+                        invoke_command::<Vec<CameraDeviceView>, _>("list_cameras", &EmptyArgs {})
+                            .await
                     {
                         cameras.set(available_cameras.clone());
                         if next_snapshot.selected_camera.is_none() {
                             if let Some(selection) = first_camera_selection(&available_cameras) {
                                 if let Ok(camera_snapshot) =
-                                    invoke_command::<AppSnapshot, _>("select_camera", &selection).await
+                                    invoke_command::<AppSnapshot, _>("select_camera", &selection)
+                                        .await
                                 {
                                     next_snapshot = camera_snapshot;
                                 }
@@ -478,16 +539,25 @@ pub fn app() -> Html {
                 .and_then(|project| {
                     selected_frame_id
                         .as_ref()
-                        .and_then(|selected| project.frames.iter().find(|frame| frame.id == *selected))
+                        .and_then(|selected| {
+                            project.frames.iter().find(|frame| frame.id == *selected)
+                        })
                         .or_else(|| project.frames.first())
                 })
                 .map(|frame| frame.id);
             let next_selected_after_delete = current_project.as_ref().and_then(|project| {
-                let index = project.frames.iter().position(|frame| Some(frame.id) == frame_id)?;
+                let index = project
+                    .frames
+                    .iter()
+                    .position(|frame| Some(frame.id) == frame_id)?;
                 project
                     .frames
                     .get(index + 1)
-                    .or_else(|| index.checked_sub(1).and_then(|left| project.frames.get(left)))
+                    .or_else(|| {
+                        index
+                            .checked_sub(1)
+                            .and_then(|left| project.frames.get(left))
+                    })
                     .map(|frame| frame.id)
             });
 
@@ -497,7 +567,12 @@ pub fn app() -> Html {
             let playing = playing.clone();
             if let Some(frame_id) = frame_id {
                 spawn_local(async move {
-                    match invoke_command::<AppSnapshot, _>("delete_frame", &DeleteFrameArg { frame_id }).await {
+                    match invoke_command::<AppSnapshot, _>(
+                        "delete_frame",
+                        &DeleteFrameArg { frame_id },
+                    )
+                    .await
+                    {
                         Ok(next_snapshot) => {
                             playing.set(false);
                             sync_snapshot(
@@ -554,7 +629,12 @@ pub fn app() -> Html {
                     .and_then(|project| {
                         selected_frame_id
                             .as_ref()
-                            .and_then(|selected| project.frames.iter().position(|frame| frame.id == *selected))
+                            .and_then(|selected| {
+                                project
+                                    .frames
+                                    .iter()
+                                    .position(|frame| frame.id == *selected)
+                            })
                             .or(Some(0))
                     })
                     .unwrap_or(0);
@@ -651,8 +731,11 @@ pub fn app() -> Html {
             <section class="status-strip">
                 <div class="status-pill">
                     <span class="status-dot"></span>
-                    <strong>{status_phase_label(&snapshot.status)}</strong>
-                    <span>{status_line}</span>
+                    <div class="status-copy">
+                        <span class="status-kicker">{"Workbench"}</span>
+                        <strong>{status_phase_label(&snapshot.status)}</strong>
+                        <span>{status_line}</span>
+                    </div>
                 </div>
                 {
                     if let Some(project) = current_project.as_ref() {
@@ -660,7 +743,7 @@ pub fn app() -> Html {
                             <div class="project-meta">
                                 <span>{project.project_path.clone()}</span>
                                 <span>{format!("{} FPS", project.fps)}</span>
-                                <span>{project.resolution.as_ref().map(|resolution| format!("{}x{}", resolution.width, resolution.height)).unwrap_or_else(|| "Resolution unlocks on first capture".to_string())}</span>
+                                <span>{resolution_label.clone()}</span>
                             </div>
                         }
                     } else {
@@ -675,7 +758,11 @@ pub fn app() -> Html {
                         <section class="editor-shell">
                             <aside class="control-panel">
                                 <div class="panel-card">
-                                    <h2>{"Camera"}</h2>
+                                    <div class="panel-heading">
+                                        <p class="panel-kicker">{"Capture Rig"}</p>
+                                        <h2>{"Camera"}</h2>
+                                    </div>
+                                    <p class="panel-copy">{"Choose the lens source and capture mode before recording the next frame."}</p>
                                     {
                                         if cameras.is_empty() {
                                             html! { <p class="muted">{"No usable `/dev/video*` camera was found."}</p> }
@@ -705,14 +792,18 @@ pub fn app() -> Html {
                                 </div>
 
                                 <div class="panel-card">
-                                    <h2>{"Actions"}</h2>
+                                    <div class="panel-heading">
+                                        <p class="panel-kicker">{"Transport Controls"}</p>
+                                        <h2>{"Actions"}</h2>
+                                    </div>
+                                    <p class="panel-copy">{"Use the physical-style controls to capture, review, trim, and export the reel."}</p>
                                     <div class="action-grid">
-                                        <button onclick={on_capture} disabled={busy || snapshot.selected_camera.is_none()}>{"Capture"}</button>
-                                        <button onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete Selected"}</button>
-                                        <button onclick={on_toggle_playback} disabled={current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
+                                        <button class="primary" onclick={on_capture} disabled={busy || snapshot.selected_camera.is_none()}>{"Capture"}</button>
+                                        <button class="danger" onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete Selected"}</button>
+                                        <button class="secondary" onclick={on_toggle_playback} disabled={current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
                                             { if *playing { "Stop Playback" } else { "Play" } }
                                         </button>
-                                        <button onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
+                                        <button class="secondary" onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
                                             {"Export MP4"}
                                         </button>
                                     </div>
@@ -739,7 +830,15 @@ pub fn app() -> Html {
 
                             <section class="workspace">
                                 <div class="preview-card">
+                                    <div class="preview-header">
+                                        <div class="preview-title">
+                                            <p class="panel-kicker">{"Lightbox"}</p>
+                                            <h2>{preview_title}</h2>
+                                        </div>
+                                        <span class="preview-badge">{preview_badge}</span>
+                                    </div>
                                     <div class="preview-stage">
+                                        <div class="preview-stage-label">{"Animation Stage"}</div>
                                         {
                                             if busy {
                                                 capture_feedback_frame.map(|frame| html! {
@@ -792,8 +891,11 @@ pub fn app() -> Html {
 
                                 <div class="timeline-card">
                                     <div class="timeline-header">
-                                        <h2>{"Timeline"}</h2>
-                                        <span>{current_project.as_ref().map(|project| format!("{} frames", project.frames.len())).unwrap_or_default()}</span>
+                                        <div>
+                                            <p class="panel-kicker">{"Film Strip"}</p>
+                                            <h2>{"Timeline"}</h2>
+                                        </div>
+                                        <span class="timeline-count">{format!("{} frames", frame_count)}</span>
                                     </div>
                                     <div class="timeline-strip">
                                         {
@@ -914,14 +1016,44 @@ pub fn app() -> Html {
                     html! {
                         <section class="welcome-shell">
                             <div class="hero-card">
-                                <p class="eyebrow">{"Jind Stop Motion"}</p>
-                                <h1>{"Build frame-by-frame motion without manual saves."}</h1>
-                                <p class="hero-copy">
-                                    {"Every capture, delete, and reorder is written to the temp workspace first and then immediately archived back into a single `.jind` file."}
-                                </p>
-                                <div class="hero-actions">
-                                    <button class="primary" onclick={on_create_project} disabled={busy}>{"Create Project"}</button>
-                                    <button onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
+                                <div class="hero-layout">
+                                    <div class="hero-copy-block">
+                                        <p class="eyebrow">{"Jind Stop Motion"}</p>
+                                        <h1>{"Build frame-by-frame motion with a tactile studio feel."}</h1>
+                                        <p class="hero-copy">
+                                            {"Every capture, delete, and reorder is written to the temp workspace first and then immediately archived back into a single `.jind` file."}
+                                        </p>
+                                        <div class="hero-actions">
+                                            <button class="primary" onclick={on_create_project} disabled={busy}>{"Create Project"}</button>
+                                            <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
+                                        </div>
+                                    </div>
+                                    <div class="hero-display" aria-hidden="true">
+                                        <div class="hero-reel">
+                                            <span>{"24 FPS"}</span>
+                                        </div>
+                                        <div class="hero-reel alt">
+                                            <span>{"Archive Safe"}</span>
+                                        </div>
+                                        <div class="hero-stat-grid">
+                                            <div class="hero-stat">
+                                                <strong>{"Single-file"}</strong>
+                                                <span>{"Project archive"}</span>
+                                            </div>
+                                            <div class="hero-stat">
+                                                <strong>{"Live"}</strong>
+                                                <span>{"Camera preview"}</span>
+                                            </div>
+                                            <div class="hero-stat">
+                                                <strong>{"Drag"}</strong>
+                                                <span>{"Reorder frames"}</span>
+                                            </div>
+                                            <div class="hero-stat">
+                                                <strong>{"MP4"}</strong>
+                                                <span>{"Export ready"}</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </section>
@@ -991,7 +1123,8 @@ where
 }
 
 fn decode_event_payload<T: DeserializeOwned>(event: JsValue) -> Result<T, String> {
-    let payload = Reflect::get(&event, &JsValue::from_str("payload")).map_err(js_error_to_string)?;
+    let payload =
+        Reflect::get(&event, &JsValue::from_str("payload")).map_err(js_error_to_string)?;
     serde_wasm_bindgen::from_value(payload).map_err(|error| error.to_string())
 }
 
@@ -1006,9 +1139,7 @@ where
 }
 
 fn js_error_to_string(error: JsValue) -> String {
-    error
-        .as_string()
-        .unwrap_or_else(|| format!("{error:?}"))
+    error.as_string().unwrap_or_else(|| format!("{error:?}"))
 }
 
 fn scroll_timeline_item_into_view(element_id: &str) {
