@@ -366,22 +366,22 @@ pub fn app() -> Html {
         .map(|resolution| format!("{}x{}", resolution.width, resolution.height))
         .unwrap_or_else(|| "Resolution unlocks on first capture".to_string());
     let preview_title = if *playing {
-        "Playback stage"
+        ""
     } else if *live_preview_enabled {
-        "Live capture stage"
+        ""
     } else if active_selected_frame.is_some() {
-        "Frame inspection stage"
+        ""
     } else {
-        "Empty stage"
+        ""
     };
     let preview_badge = if busy {
-        "Processing"
+        ""
     } else if *playing {
-        "15 FPS"
+        ""
     } else if *live_preview_enabled {
-        "Live"
+        ""
     } else {
-        "Still"
+        ""
     };
 
     let on_create_project = {
@@ -728,29 +728,6 @@ pub fn app() -> Html {
 
     html! {
         <main class="app-shell">
-            <section class="status-strip">
-                <div class="status-pill">
-                    <span class="status-dot"></span>
-                    <div class="status-copy">
-                        <span class="status-kicker">{"Workbench"}</span>
-                        <strong>{status_phase_label(&snapshot.status)}</strong>
-                        <span>{status_line}</span>
-                    </div>
-                </div>
-                {
-                    if let Some(project) = current_project.as_ref() {
-                        html! {
-                            <div class="project-meta">
-                                <span>{project.project_path.clone()}</span>
-                                <span>{format!("{} FPS", project.fps)}</span>
-                                <span>{resolution_label.clone()}</span>
-                            </div>
-                        }
-                    } else {
-                        html! { <div class="project-meta"><span>{"No project open"}</span></div> }
-                    }
-                }
-            </section>
 
             {
                 if has_project {
@@ -759,10 +736,10 @@ pub fn app() -> Html {
                             <aside class="control-panel">
                                 <div class="panel-card">
                                     <div class="panel-heading">
-                                        <p class="panel-kicker">{"Capture Rig"}</p>
+                                        <p class="panel-kicker">{"Capture setup"}</p>
                                         <h2>{"Camera"}</h2>
                                     </div>
-                                    <p class="panel-copy">{"Choose the lens source and capture mode before recording the next frame."}</p>
+                                    <p class="panel-copy">{"Choose the camera input and mode before you capture the next frame."}</p>
                                     {
                                         if cameras.is_empty() {
                                             html! { <p class="muted">{"No usable `/dev/video*` camera was found."}</p> }
@@ -793,10 +770,10 @@ pub fn app() -> Html {
 
                                 <div class="panel-card">
                                     <div class="panel-heading">
-                                        <p class="panel-kicker">{"Transport Controls"}</p>
+                                        <p class="panel-kicker">{"Controls"}</p>
                                         <h2>{"Actions"}</h2>
                                     </div>
-                                    <p class="panel-copy">{"Use the physical-style controls to capture, review, trim, and export the reel."}</p>
+                                    <p class="panel-copy">{"Welcome to Jind stop motion software"}</p>
                                     <div class="action-grid">
                                         <button class="primary" onclick={on_capture} disabled={busy || snapshot.selected_camera.is_none()}>{"Capture"}</button>
                                         <button class="danger" onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete Selected"}</button>
@@ -820,7 +797,7 @@ pub fn app() -> Html {
                                     </label>
                                     {
                                         if !snapshot.ffmpeg_available {
-                                            html! { <p class="muted">{"`ffmpeg` is not on PATH, so export is disabled."}</p> }
+                                            html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled."}</p> }
                                         } else {
                                             html! {}
                                         }
@@ -832,26 +809,26 @@ pub fn app() -> Html {
                                 <div class="preview-card">
                                     <div class="preview-header">
                                         <div class="preview-title">
-                                            <p class="panel-kicker">{"Lightbox"}</p>
+                                            <p class="panel-kicker">{""}</p>
                                             <h2>{preview_title}</h2>
                                         </div>
-                                        <span class="preview-badge">{preview_badge}</span>
+                                        // <span class="preview-badge">{preview_badge}</span>
                                     </div>
                                     <div class="preview-stage">
-                                        <div class="preview-stage-label">{"Animation Stage"}</div>
+                                        <div class="preview-stage-label">{"Camera preview"}</div>
                                         {
                                             if busy {
                                                 capture_feedback_frame.map(|frame| html! {
-                                                    <img class="preview-image" src={frame.image_url.clone()} alt="Latest frame" />
+                                                    <img class="preview-image" src={frame.image_url.clone()} alt="latest frame" />
                                                 }).unwrap_or_else(|| {
                                                     if let Some(preview_stream_url) = preview_stream_url.clone() {
                                                         html! {
                                                             <>
-                                                                <img class="preview-image" src={preview_stream_url} alt="Live preview" />
+                                                                <img class="preview-image" src={preview_stream_url} alt="live preview here" />
                                                                 {
                                                                     if *onion_skin_enabled {
                                                                         live_onion_frame.map(|frame| html! {
-                                                                            <img class="preview-image onion-layer" src={frame.image_url.clone()} alt="Onion skin frame" />
+                                                                            <img class="preview-image onion-layer" src={frame.image_url.clone()} alt="onion skin" />
                                                                         }).unwrap_or_default()
                                                                     } else {
                                                                         html! {}
@@ -860,7 +837,7 @@ pub fn app() -> Html {
                                                             </>
                                                         }
                                                     } else {
-                                                        html! { <div class="preview-placeholder">{"Working..."}</div> }
+                                                        html! { <div class="preview-placeholder">{"Processing capture..."}</div> }
                                                     }
                                                 })
                                             } else if let Some(preview_stream_url) = preview_stream_url.clone() {
@@ -880,10 +857,10 @@ pub fn app() -> Html {
                                                 }
                                             } else if let Some(frame) = active_selected_frame {
                                                 html! {
-                                                    <img class="preview-image" src={frame.image_url.clone()} alt="Selected frame" />
+                                                    <img class="preview-image" src={frame.image_url.clone()} alt="selected frame" />
                                                 }
                                             } else {
-                                                html! { <div class="preview-placeholder">{"Select a camera and capture your first frame."}</div> }
+                                                html! { <div class="preview-placeholder">{"Select a camera, then capture a frame."}</div> }
                                             }
                                         }
                                     </div>
@@ -892,7 +869,7 @@ pub fn app() -> Html {
                                 <div class="timeline-card">
                                     <div class="timeline-header">
                                         <div>
-                                            <p class="panel-kicker">{"Film Strip"}</p>
+                                            <p class="panel-kicker">{"Frames"}</p>
                                             <h2>{"Timeline"}</h2>
                                         </div>
                                         <span class="timeline-count">{format!("{} frames", frame_count)}</span>
@@ -1014,49 +991,56 @@ pub fn app() -> Html {
                     }
                 } else {
                     html! {
+
+                        <div>
+
+                        <section class="status-strip">
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    <div class="status-copy">
+                        // <span class="status-kicker">{"System status"}</span>
+                        // <strong>{status_phase_label(&snapshot.status)}</strong>
+                        // <span>{status_line}</span>
+                    </div>
+                </div>
+                {
+                    if let Some(project) = current_project.as_ref() {
+                        html! {
+                            <div class="project-meta">
+                                <span>{project.project_path.clone()}</span>
+                                <span>{format!("{} FPS", project.fps)}</span>
+                                <span>{resolution_label.clone()}</span>
+                            </div>
+                        }
+                    } else {
+                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
+                    }
+                }
+            </section>
+
+
+
+
+
                         <section class="welcome-shell">
                             <div class="hero-card">
                                 <div class="hero-layout">
                                     <div class="hero-copy-block">
-                                        <p class="eyebrow">{"Jind Stop Motion"}</p>
-                                        <h1>{"Build frame-by-frame motion with a tactile studio feel."}</h1>
+                                        <p class="eyebrow">{"Yes its written in rust"}</p>
+                                        <h1>{"Welcome to Jind, a stop motion animation program"}</h1>
                                         <p class="hero-copy">
-                                            {"Every capture, delete, and reorder is written to the temp workspace first and then immediately archived back into a single `.jind` file."}
+                                            {"Guaranteed to be 1000% bug free with no issues"}
                                         </p>
                                         <div class="hero-actions">
-                                            <button class="primary" onclick={on_create_project} disabled={busy}>{"Create Project"}</button>
+                                            <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
                                             <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
-                                        </div>
-                                    </div>
-                                    <div class="hero-display" aria-hidden="true">
-                                        <div class="hero-reel">
-                                            <span>{"24 FPS"}</span>
-                                        </div>
-                                        <div class="hero-reel alt">
-                                            <span>{"Archive Safe"}</span>
-                                        </div>
-                                        <div class="hero-stat-grid">
-                                            <div class="hero-stat">
-                                                <strong>{"Single-file"}</strong>
-                                                <span>{"Project archive"}</span>
-                                            </div>
-                                            <div class="hero-stat">
-                                                <strong>{"Live"}</strong>
-                                                <span>{"Camera preview"}</span>
-                                            </div>
-                                            <div class="hero-stat">
-                                                <strong>{"Drag"}</strong>
-                                                <span>{"Reorder frames"}</span>
-                                            </div>
-                                            <div class="hero-stat">
-                                                <strong>{"MP4"}</strong>
-                                                <span>{"Export ready"}</span>
-                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </section>
+
+                        </div>
                     }
                 }
             }
@@ -1066,8 +1050,8 @@ pub fn app() -> Html {
                     html! {
                         <div class="modal-scrim">
                             <div class="modal-card">
-                                <h2>{"Cleaning up..."}</h2>
-                                <p>{"The current operation is finishing and the workspace is being closed safely."}</p>
+                                <h2>{"Cleaning Up"}</h2>
+                                <p>{"The app will close when file operations finish."}</p>
                             </div>
                         </div>
                     }
