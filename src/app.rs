@@ -1286,7 +1286,7 @@ pub fn app() -> Html {
                                         <h1>{"Jind stop motion"}</h1>
                                         <p class="hero-copy">
                                             // {"Jind means \"life\" or \"soul\""}
-                                            {"yes, we wrote it in rust"}
+                                            {"yes, its written in rust"}
                                         </p>
                                         <div class="hero-actions">
                                             <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>

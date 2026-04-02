@@ -7,6 +7,7 @@ Jind is a very simple stop motion animation program written in Rust using Tauri 
 
 
 ### todo
-- arrow keys to navigate frames
+- arrow key shortcuts to navigate frames
 - redo ui with better css and less bloat
 - autoregister .jind file association 
+- builds for Android, IOS, Windows, MacOS
