@@ -816,6 +816,7 @@ input[type="range"]:disabled {
 }
 
 .onion-layer {
+  position: absolute;
   mix-blend-mode: screen;
 }
 
