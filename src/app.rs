@@ -994,52 +994,47 @@ pub fn app() -> Html {
 
                         <div>
 
-                        <section class="status-strip">
-                <div class="status-pill">
-                    <span class="status-dot"></span>
-                    <div class="status-copy">
-                        // <span class="status-kicker">{"System status"}</span>
-                        // <strong>{status_phase_label(&snapshot.status)}</strong>
-                        // <span>{status_line}</span>
-                    </div>
-                </div>
-                {
-                    if let Some(project) = current_project.as_ref() {
-                        html! {
-                            <div class="project-meta">
-                                <span>{project.project_path.clone()}</span>
-                                <span>{format!("{} FPS", project.fps)}</span>
-                                <span>{resolution_label.clone()}</span>
-                            </div>
-                        }
-                    } else {
-                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
-                    }
-                }
-            </section>
+                            <section class="status-strip">
+                                <div class="status-pill">
+                                    <span class="status-dot"></span>
+                                    <div class="status-copy">
+                                        // <span class="status-kicker">{"System status"}</span>
+                                        // <strong>{status_phase_label(&snapshot.status)}</strong>
+                                        // <span>{status_line}</span>
+                                    </div>
+                                </div>
+                                {
+                                    if let Some(project) = current_project.as_ref() {
+                                        html! {
+                                            <div class="project-meta">
+                                                <span>{project.project_path.clone()}</span>
+                                                <span>{format!("{} FPS", project.fps)}</span>
+                                                <span>{resolution_label.clone()}</span>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
+                                    }
+                                }
+                            </section>
 
-
-
-
-
-                        <section class="welcome-shell">
-                            <div class="hero-card">
-                                <div class="hero-layout">
-                                    <div class="hero-copy-block">
-                                        <p class="eyebrow">{"Yes its written in rust"}</p>
-                                        <h1>{"Welcome to Jind, a stop motion animation program"}</h1>
-                                        <p class="hero-copy">
-                                            {"Guaranteed to be 1000% bug free with no issues"}
-                                        </p>
-                                        <div class="hero-actions">
-                                            <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
-                                            <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
+                            <section class="welcome-shell">
+                                <div class="hero-card">
+                                    <div class="hero-layout">
+                                        <div class="hero-copy-block">
+                                            <p class="eyebrow">{"Release 0.1 Alpha"}</p>
+                                            <h1>{"Welcome to Jind, a stop motion animation program"}</h1>
+                                            <p class="hero-copy">
+                                                {"Jind means \"life\" or \"soul\""}
+                                            </p>
+                                            <div class="hero-actions">
+                                                <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
+                                                <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        </section>
-
+                            </section>
                         </div>
                     }
                 }
