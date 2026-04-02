@@ -605,18 +605,28 @@ input[type="range"]:disabled {
 }
 
 .icon-button {
-  min-height: 3rem;
-  padding: 0.7rem;
+  min-height: 0.5rem;
+  padding: 0.5rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
+
+
 .control-icon {
-  width: 1.15rem;
-  height: 1.15rem;
+  /* width: 1.15rem;
+  height: 1.15rem; */
   display: block;
   flex: 0 0 auto;
+  box-shadow: none !important;
+  background: none !important;
+  border-width: 0px;
+}
+
+.circle-btn {
+  border-radius: 100%;
+  margin: 0.4rem;
 }
 
 .toggle {
@@ -724,12 +734,13 @@ input[type="range"]:disabled {
 }
 
 
-
 .preview-card {
-  height: 100%;
+  /* height: 100%; */
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  justify-content: center;
+  align-items: center;
 }
 
 .preview-title {
@@ -760,7 +771,7 @@ input[type="range"]:disabled {
 .preview-stage {
   width: 100%;
   flex: 1;
-  min-height: 0;
+  min-height: 100%;
   border-radius: 8px;
   overflow: hidden;
   position: relative;
@@ -784,12 +795,24 @@ input[type="range"]:disabled {
   pointer-events: none;
 }
 
-.preview-image {
+.preview-stage {
+  width: fit-content;   /* 🔑 key change */
+  height: fit-content;
+  flex: 0;              /* don’t stretch */
+}
+
+/* .preview-image {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+} */
+
+.preview-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .onion-layer {
@@ -810,7 +833,7 @@ input[type="range"]:disabled {
 .timeline-card {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  /* gap: 0.75rem; */
   max-height: min(15rem, 28svh);
 }
 
@@ -824,7 +847,7 @@ input[type="range"]:disabled {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  align-items: end;
+  align-items: center;
 }
 
 .timeline-strip {

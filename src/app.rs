@@ -980,33 +980,33 @@ pub fn app() -> Html {
                                     </button> // combine export with frame count thingy
 
                                     <div class="action-grid">
-                                        <button
-                                            class="primary icon-button"
-                                            onclick={to_mouse_cb(on_capture.clone())}
-                                            disabled={busy || snapshot.selected_camera.is_none()}
-                                            aria-label="Capture frame"
-                                            title="Capture frame"
-                                        >
-                                            {capture_icon}
-                                        </button>
-                                        <button
-                                            class="danger icon-button"
-                                            onclick={to_mouse_cb(on_delete.clone())}
-                                            disabled={busy || delete_target_frame_id.is_none()}
-                                            aria-label="Delete frame"
-                                            title="Delete frame"
-                                        >
-                                            {delete_icon}
-                                        </button>
-                                        <button
-                                            class="secondary icon-button"
-                                            onclick={on_toggle_playback}
-                                            disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
-                                            aria-label={if *playing { "Pause playback" } else { "Start playback" }}
-                                            title={if *playing { "Pause playback" } else { "Start playback" }}
-                                        >
-                                            {playback_icon}
-                                        </button>
+                                        // <button
+                                        //     class="primary icon-button"
+                                        //     onclick={to_mouse_cb(on_capture.clone())}
+                                        //     disabled={busy || snapshot.selected_camera.is_none()}
+                                        //     aria-label="Capture frame"
+                                        //     title="Capture frame"
+                                        // >
+                                        //     {capture_icon}
+                                        // </button>
+                                        // <button
+                                        //     class="danger icon-button"
+                                        //     onclick={to_mouse_cb(on_delete.clone())}
+                                        //     disabled={busy || delete_target_frame_id.is_none()}
+                                        //     aria-label="Delete frame"
+                                        //     title="Delete frame"
+                                        // >
+                                        //     {delete_icon}
+                                        // </button>
+                                        // <button
+                                        //     class="secondary icon-button"
+                                        //     onclick={on_toggle_playback}
+                                        //     disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
+                                        //     aria-label={if *playing { "Pause playback" } else { "Start playback" }}
+                                        //     title={if *playing { "Pause playback" } else { "Start playback" }}
+                                        // >
+                                        //     {playback_icon}
+                                        // </button>
                                     </div>
 
                                     {
@@ -1089,12 +1089,40 @@ pub fn app() -> Html {
                             </section>
 
                             <div class="timeline-card timeline-card--dock">
-                                // <div class="timeline-header">
-                                //     <div>
-                                //         // <p class="panel-kicker">{"Frames"}</p>
-                                //         <h2>{"Timeline"}</h2>
-                                //     </div>
-                                // </div>
+                                <div class="timeline-header">
+                                    // <div>
+                                        // <p class="panel-kicker">{"Frames"}</p>
+                                        // <h2>{"Timeline"}</h2>
+                                        <button
+                                            class="secondary icon-button control-icon"
+                                            onclick={on_toggle_playback}
+                                            disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
+                                            aria-label={if *playing { "Pause playback" } else { "Start playback" }}
+                                            title={if *playing { "Pause playback" } else { "Start playback" }}
+                                        >
+                                            {playback_icon}
+                                        </button>
+                                        <button
+                                            class="primary icon-button circle-btn"
+                                            onclick={to_mouse_cb(on_capture.clone())}
+                                            disabled={busy || snapshot.selected_camera.is_none()}
+                                            aria-label="Capture frame"
+                                            title="Capture frame"
+                                        >
+                                            {capture_icon}
+                                        </button>
+                                        <button
+                                            class="danger icon-button control-icon"
+                                            onclick={to_mouse_cb(on_delete.clone())}
+                                            disabled={busy || delete_target_frame_id.is_none()}
+                                            aria-label="Delete frame"
+                                            title="Delete frame"
+                                        >
+                                            {delete_icon}
+                                        </button>
+
+                                    // </div>
+                                </div>
                                 <div class="timeline-strip">
                                     {
                                         current_project.as_ref().map(|project| {
