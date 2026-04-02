@@ -5,7 +5,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{window, DragEvent, HtmlElement, HtmlSelectElement};
+use web_sys::{window, DragEvent, HtmlElement, HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
 const STATUS_EVENT: &str = "jind://status";
@@ -123,7 +123,9 @@ pub fn app() -> Html {
     let dragged_frame_id = use_state(|| None::<u64>);
     let live_preview_enabled = use_state(|| true);
     let onion_skin_enabled = use_state(|| true);
+    let onion_skin_opacity = use_state(|| 38_u32);
     let playing = use_state(|| false);
+    let camera_modal_open = use_state(|| false);
     let playback_cursor = use_mut_ref(|| 0_usize);
     let capture_feedback_frame_id = use_state(|| None::<u64>);
 
@@ -318,6 +320,7 @@ pub fn app() -> Html {
         .clone()
         .filter(|_| snapshot.selected_camera.is_some() && *live_preview_enabled && !*playing)
         .map(|url| format!("{url}?device={current_device_id}&mode={current_mode_id}"));
+    let onion_skin_style = format!("opacity: {:.2};", *onion_skin_opacity as f64 / 100.0);
 
     {
         use_effect_with(
@@ -365,24 +368,11 @@ pub fn app() -> Html {
         .and_then(|project| project.resolution.as_ref())
         .map(|resolution| format!("{}x{}", resolution.width, resolution.height))
         .unwrap_or_else(|| "Resolution unlocks on first capture".to_string());
-    let preview_title = if *playing {
-        ""
-    } else if *live_preview_enabled {
-        ""
-    } else if active_selected_frame.is_some() {
-        ""
-    } else {
-        ""
-    };
-    let preview_badge = if busy {
-        ""
-    } else if *playing {
-        ""
-    } else if *live_preview_enabled {
-        ""
-    } else {
-        ""
-    };
+    let app_shell_classes = classes!(
+        "app-shell",
+        has_project.then_some("app-shell--project"),
+        (!has_project).then_some("app-shell--welcome"),
+    );
 
     let on_create_project = {
         let snapshot = snapshot.clone();
@@ -726,49 +716,29 @@ pub fn app() -> Html {
         })
     };
 
+    let on_open_camera_modal = {
+        let camera_modal_open = camera_modal_open.clone();
+        Callback::from(move |_| camera_modal_open.set(true))
+    };
+
+    let on_close_camera_modal = {
+        let camera_modal_open = camera_modal_open.clone();
+        Callback::from(move |_| camera_modal_open.set(false))
+    };
+
+    let on_camera_modal_card_click = Callback::from(|event: MouseEvent| {
+        event.stop_propagation();
+    });
+
     html! {
-        <main class="app-shell">
+        <main class={app_shell_classes}>
 
             {
                 if has_project {
                     html! {
                         <section class="editor-shell">
                             <aside class="control-panel">
-                                <div class="panel-card">
-                                    <div class="panel-heading">
-                                        <p class="panel-kicker">{"Capture setup"}</p>
-                                        <h2>{"Camera"}</h2>
-                                    </div>
-                                    <p class="panel-copy">{"Choose the camera input and mode before you capture the next frame."}</p>
-                                    {
-                                        if cameras.is_empty() {
-                                            html! { <p class="muted">{"No usable `/dev/video*` camera was found."}</p> }
-                                        } else {
-                                            html! {
-                                                <>
-                                                    <label class="field">
-                                                        <span>{"Device"}</span>
-                                                        <select value={current_device_id.clone()} onchange={on_device_change} disabled={busy}>
-                                                            { for cameras.iter().map(|camera| html! {
-                                                                <option value={camera.device_id.clone()}>{camera.label.clone()}</option>
-                                                            }) }
-                                                        </select>
-                                                    </label>
-                                                    <label class="field">
-                                                        <span>{"Mode"}</span>
-                                                        <select value={current_mode_id.clone()} onchange={on_mode_change} disabled={busy}>
-                                                            { for current_modes.iter().map(|mode| html! {
-                                                                <option value={mode.id.clone()}>{mode.label.clone()}</option>
-                                                            }) }
-                                                        </select>
-                                                    </label>
-                                                </>
-                                            }
-                                        }
-                                    }
-                                </div>
-
-                                <div class="panel-card">
+                                <div class="panel-card panel-card--actions">
                                     <div class="panel-heading">
                                         <p class="panel-kicker">{"Controls"}</p>
                                         <h2>{"Actions"}</h2>
@@ -776,9 +746,9 @@ pub fn app() -> Html {
                                     <p class="panel-copy">{"Welcome to Jind stop motion software"}</p>
                                     <div class="action-grid">
                                         <button class="primary" onclick={on_capture} disabled={busy || snapshot.selected_camera.is_none()}>{"Capture"}</button>
-                                        <button class="danger" onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete Selected"}</button>
+                                        <button class="danger" onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete frame"}</button>
                                         <button class="secondary" onclick={on_toggle_playback} disabled={current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
-                                            { if *playing { "Stop Playback" } else { "Play" } }
+                                            { if *playing { "Stop" } else { "Play" } }
                                         </button>
                                         <button class="secondary" onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
                                             {"Export MP4"}
@@ -786,18 +756,46 @@ pub fn app() -> Html {
                                     </div>
                                     <label class="toggle">
                                         <input
+                                            class="toggle-input"
                                             type="checkbox"
                                             checked={*onion_skin_enabled}
                                             onchange={{
                                                 let onion_skin_enabled = onion_skin_enabled.clone();
-                                                Callback::from(move |_| onion_skin_enabled.set(!*onion_skin_enabled))
+                                                Callback::from(move |event: Event| {
+                                                    let input: HtmlInputElement =
+                                                        event.target_unchecked_into();
+                                                    onion_skin_enabled.set(input.checked());
+                                                })
                                             }}
                                         />
+                                        <span class="toggle-switch" aria-hidden="true"></span>
                                         <span>{"Onion skin"}</span>
+                                    </label>
+                                    <label class="field slider-field">
+                                        <span>{format!("Onion opacity {}%", *onion_skin_opacity)}</span>
+                                        <input
+                                            class="slider-input"
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            step="1"
+                                            value={(*onion_skin_opacity).to_string()}
+                                            disabled={!*onion_skin_enabled}
+                                            oninput={{
+                                                let onion_skin_opacity = onion_skin_opacity.clone();
+                                                Callback::from(move |event: InputEvent| {
+                                                    let input: HtmlInputElement =
+                                                        event.target_unchecked_into();
+                                                    if let Ok(value) = input.value().parse::<u32>() {
+                                                        onion_skin_opacity.set(value);
+                                                    }
+                                                })
+                                            }}
+                                        />
                                     </label>
                                     {
                                         if !snapshot.ffmpeg_available {
-                                            html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled."}</p> }
+                                            html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled"}</p> }
                                         } else {
                                             html! {}
                                         }
@@ -809,10 +807,12 @@ pub fn app() -> Html {
                                 <div class="preview-card">
                                     <div class="preview-header">
                                         <div class="preview-title">
-                                            <p class="panel-kicker">{""}</p>
-                                            <h2>{preview_title}</h2>
+                                            <p class="panel-kicker">{"Viewport"}</p>
+                                            <h2>{"Preview"}</h2>
                                         </div>
-                                        // <span class="preview-badge">{preview_badge}</span>
+                                        <button class="secondary preview-camera-button" onclick={on_open_camera_modal.clone()}>
+                                            {"Camera"}
+                                        </button>
                                     </div>
                                     <div class="preview-stage">
                                         <div class="preview-stage-label">{"Camera preview"}</div>
@@ -828,7 +828,7 @@ pub fn app() -> Html {
                                                                 {
                                                                     if *onion_skin_enabled {
                                                                         live_onion_frame.map(|frame| html! {
-                                                                            <img class="preview-image onion-layer" src={frame.image_url.clone()} alt="onion skin" />
+                                                                            <img class="preview-image onion-layer" style={onion_skin_style.clone()} src={frame.image_url.clone()} alt="onion skin" />
                                                                         }).unwrap_or_default()
                                                                     } else {
                                                                         html! {}
@@ -847,7 +847,7 @@ pub fn app() -> Html {
                                                         {
                                                             if *onion_skin_enabled {
                                                                 live_onion_frame.map(|frame| html! {
-                                                                    <img class="preview-image onion-layer" src={frame.image_url.clone()} alt="Onion skin frame" />
+                                                                    <img class="preview-image onion-layer" style={onion_skin_style.clone()} src={frame.image_url.clone()} alt="Onion skin frame" />
                                                                 }).unwrap_or_default()
                                                             } else {
                                                                 html! {}
@@ -866,7 +866,7 @@ pub fn app() -> Html {
                                     </div>
                                 </div>
 
-                                <div class="timeline-card">
+                                <div class="timeline-card timeline-card--dock">
                                     <div class="timeline-header">
                                         <div>
                                             <p class="panel-kicker">{"Frames"}</p>
@@ -991,51 +991,50 @@ pub fn app() -> Html {
                     }
                 } else {
                     html! {
+                    <div>
 
-                        <div>
-
-                            <section class="status-strip">
-                                <div class="status-pill">
-                                    <span class="status-dot"></span>
-                                    <div class="status-copy">
-                                        // <span class="status-kicker">{"System status"}</span>
-                                        // <strong>{status_phase_label(&snapshot.status)}</strong>
-                                        // <span>{status_line}</span>
-                                    </div>
-                                </div>
-                                {
-                                    if let Some(project) = current_project.as_ref() {
-                                        html! {
-                                            <div class="project-meta">
-                                                <span>{project.project_path.clone()}</span>
-                                                <span>{format!("{} FPS", project.fps)}</span>
-                                                <span>{resolution_label.clone()}</span>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
-                                    }
-                                }
-                            </section>
-
-                            <section class="welcome-shell">
-                                <div class="hero-card">
-                                    <div class="hero-layout">
-                                        <div class="hero-copy-block">
-                                            <p class="eyebrow">{"Release 0.1 Alpha"}</p>
-                                            <h1>{"Welcome to Jind, a stop motion animation program"}</h1>
-                                            <p class="hero-copy">
-                                                {"Jind means \"life\" or \"soul\""}
-                                            </p>
-                                            <div class="hero-actions">
-                                                <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
-                                                <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
-                                            </div>
+                    <section class="status-strip">
+                <div class="status-pill">
+                    // <span class="status-dot"></span>
+                    // <div class="status-copy">
+                        // <span class="status-kicker">{"System status"}</span>
+                        // <strong>{status_phase_label(&snapshot.status)}</strong>
+                        // <span>{status_line.clone()}</span>
+                    // </div>
+                </div>
+                {
+                    if let Some(project) = current_project.as_ref() {
+                        html! {
+                            <div class="project-meta">
+                                <span title={project.project_path.clone()}>{project.project_path.clone()}</span>
+                                <span>{format!("{} FPS", project.fps)}</span>
+                                <span>{resolution_label.clone()}</span>
+                            </div>
+                        }
+                    } else {
+                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
+                    }
+                }
+            </section>
+                        <section class="welcome-shell">
+                            <div class="hero-card">
+                                <div class="hero-layout">
+                                    <div class="hero-copy-block">
+                                        <p class="eyebrow">{"Release v0.1 Alpha"}</p>
+                                        <h1>{"Welcome to Jind stop motion"}</h1>
+                                        <p class="hero-copy">
+                                            {"Jind means \"life\" or \"soul\""}
+                                        </p>
+                                        <div class="hero-actions">
+                                            <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
+                                            <button class="secondary" onclick={on_open_project} disabled={busy}>{"Open Project"}</button>
                                         </div>
                                     </div>
                                 </div>
-                            </section>
-                        </div>
+                            </div>
+                        </section>
+                    </div>
+
                     }
                 }
             }
@@ -1047,6 +1046,49 @@ pub fn app() -> Html {
                             <div class="modal-card">
                                 <h2>{"Cleaning Up"}</h2>
                                 <p>{"The app will close when file operations finish."}</p>
+                            </div>
+                        </div>
+                    }
+                } else if *camera_modal_open {
+                    html! {
+                        <div class="modal-scrim" onclick={on_close_camera_modal.clone()}>
+                            <div class="modal-card camera-modal" onclick={on_camera_modal_card_click}>
+                                <div class="panel-heading">
+                                    <div>
+                                        <p class="panel-kicker">{"Capture setup"}</p>
+                                        <h2>{"Camera"}</h2>
+                                    </div>
+                                    <button class="secondary modal-close-button" onclick={on_close_camera_modal.clone()}>
+                                        {"Close"}
+                                    </button>
+                                </div>
+                                <p class="panel-copy">{"Choose the camera input and mode before you capture the next frame."}</p>
+                                {
+                                    if cameras.is_empty() {
+                                        html! { <p class="muted">{"No usable `/dev/video*` camera was found."}</p> }
+                                    } else {
+                                        html! {
+                                            <>
+                                                <label class="field">
+                                                    <span>{"Device"}</span>
+                                                    <select value={current_device_id.clone()} onchange={on_device_change} disabled={busy}>
+                                                        { for cameras.iter().map(|camera| html! {
+                                                            <option value={camera.device_id.clone()}>{camera.label.clone()}</option>
+                                                        }) }
+                                                    </select>
+                                                </label>
+                                                <label class="field">
+                                                    <span>{"Mode"}</span>
+                                                    <select value={current_mode_id.clone()} onchange={on_mode_change} disabled={busy}>
+                                                        { for current_modes.iter().map(|mode| html! {
+                                                            <option value={mode.id.clone()}>{mode.label.clone()}</option>
+                                                        }) }
+                                                    </select>
+                                                </label>
+                                            </>
+                                        }
+                                    }
+                                }
                             </div>
                         </div>
                     }
