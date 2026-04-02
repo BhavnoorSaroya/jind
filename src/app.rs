@@ -886,63 +886,35 @@ pub fn app() -> Html {
     }
 
     let capture_icon = html! {
-        <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-                d="M8 7 9.5 5h5L16 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-            />
-            <circle
-                cx="12"
-                cy="13"
-                r="3.25"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-            />
+    // took from heroicons
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6" style="height: 1.5rem; width: auto;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
         </svg>
+
     };
 
     let delete_icon = html! {
-        <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-                d="M4 7h16M9 3h6m-7 4v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V7"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-            />
-            <path
-                d="M10 11v5m4-5v5"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-width="1.8"
-            />
+    // took from heroicons
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6" style="height: 1.5rem; width: auto;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
         </svg>
+
     };
 
     let playback_icon = if *playing {
         html! {
-            <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 7h2.75v10H9zm4.25 0H16v10h-2.75z" fill="currentColor" />
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6" style="height: 1.5rem; width: auto;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
             </svg>
+
         }
     } else {
         html! {
-            <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                    d="M8.5 6.75v10.5L17 12 8.5 6.75Z"
-                    fill="currentColor"
-                    stroke="currentColor"
-                    stroke-linejoin="round"
-                    stroke-width="1.1"
-                />
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6" style="height: 1.5rem; width: auto;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
             </svg>
+
         }
     };
 

@@ -197,6 +197,14 @@ input[type="range"]:disabled {
   overflow: hidden;
 }
 
+
+.app-shell--welcome {
+  display: flex;
+  align-items: center;
+  height: auto;
+}
+
+
 .app-shell--project {
   grid-template-rows: minmax(0, 1fr);
 }
@@ -355,7 +363,7 @@ input[type="range"]:disabled {
   display: grid;
   grid-template-columns: minmax(18rem, 0.82fr) minmax(0, 1fr);
   align-items: center;
-  gap: clamp(1rem, 2vw, 1.8rem);
+  gap: 0.4vw;
 }
 
 .maharani-card {
@@ -439,6 +447,7 @@ input[type="range"]:disabled {
   border: 1px solid rgba(55, 247, 18, 0.08);
   background:
     linear-gradient(180deg, rgba(14, 19, 14, 0.82) 0%, rgba(10, 14, 10, 0.82) 100%);
+  height: 100%;
 }
 
 .hero-card h1 {
@@ -962,8 +971,14 @@ input[type="range"]:disabled {
 
 @media (max-width: 1024px) {
   .hero-layout {
-    grid-template-columns: 1fr;
+    /* grid-template-columns: 1fr; */
+
   }
+
+  /* display: grid;
+  grid-template-columns: minmax(18rem, 0.82fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(1rem, 2vw, 1.8rem); */
 
   .maharani-card {
     max-width: 28rem;
