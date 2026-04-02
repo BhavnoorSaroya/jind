@@ -5,7 +5,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{window, DragEvent, HtmlElement, HtmlInputElement, HtmlSelectElement};
+use web_sys::{
+    window, DragEvent, HtmlElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement,
+};
 use yew::prelude::*;
 
 const STATUS_EVENT: &str = "jind://status";
@@ -26,6 +28,7 @@ struct AppSnapshot {
     selected_camera: Option<SelectedCameraView>,
     ffmpeg_available: bool,
     preview_url: Option<String>,
+    preview_still_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -114,6 +117,13 @@ struct ReorderFramesArg {
 #[derive(Serialize, Default)]
 struct EmptyArgs {}
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ExportModalState {
+    visible: bool,
+    completed: bool,
+    export_path: Option<String>,
+}
+
 #[function_component(App)]
 pub fn app() -> Html {
     let snapshot = use_state(AppSnapshot::default);
@@ -127,7 +137,9 @@ pub fn app() -> Html {
     let playing = use_state(|| false);
     let camera_modal_open = use_state(|| false);
     let playback_cursor = use_mut_ref(|| 0_usize);
-    let capture_feedback_frame_id = use_state(|| None::<u64>);
+    let capture_preview_nonce = use_state(|| 0_u64);
+    let frozen_preview_url = use_state(|| None::<String>);
+    let export_modal = use_state(ExportModalState::default);
 
     {
         let snapshot = snapshot.clone();
@@ -222,6 +234,8 @@ pub fn app() -> Html {
         );
     }
 
+    // global keyboard listener for keyboard shortcuts
+
     {
         let playing = playing.clone();
         let selected_frame_id = selected_frame_id.clone();
@@ -307,11 +321,6 @@ pub fn app() -> Html {
     } else {
         active_selected_frame_id
     };
-    let capture_feedback_frame = current_project.as_ref().and_then(|project| {
-        capture_feedback_frame_id
-            .as_ref()
-            .and_then(|selected| project.frames.iter().find(|frame| frame.id == *selected))
-    });
     let live_onion_frame = current_project
         .as_ref()
         .and_then(|project| project.frames.last());
@@ -320,6 +329,16 @@ pub fn app() -> Html {
         .clone()
         .filter(|_| snapshot.selected_camera.is_some() && *live_preview_enabled && !*playing)
         .map(|url| format!("{url}?device={current_device_id}&mode={current_mode_id}"));
+    let preview_still_url = snapshot
+        .preview_still_url
+        .clone()
+        .filter(|_| snapshot.selected_camera.is_some() && *live_preview_enabled && !*playing)
+        .map(|url| {
+            format!(
+                "{url}?device={current_device_id}&mode={current_mode_id}&capture={}",
+                *capture_preview_nonce
+            )
+        });
     let onion_skin_style = format!("opacity: {:.2};", *onion_skin_opacity as f64 / 100.0);
 
     {
@@ -473,14 +492,16 @@ pub fn app() -> Html {
     };
 
     let on_capture = {
-        let current_project_for_capture = current_project.clone();
         let snapshot = snapshot.clone();
         let project_cache = project_cache.clone();
         let live_preview_enabled = live_preview_enabled.clone();
         let playing = playing.clone();
         let selected_frame_id = selected_frame_id.clone();
         let playback_cursor = playback_cursor.clone();
-        let capture_feedback_frame_id = capture_feedback_frame_id.clone();
+        let capture_preview_nonce = capture_preview_nonce.clone();
+        let frozen_preview_url = frozen_preview_url.clone();
+        let current_device_id = current_device_id.clone();
+        let current_mode_id = current_mode_id.clone();
         Callback::from(move |_| {
             let snapshot = snapshot.clone();
             let project_cache = project_cache.clone();
@@ -488,14 +509,19 @@ pub fn app() -> Html {
             let playing = playing.clone();
             let selected_frame_id = selected_frame_id.clone();
             let playback_cursor = playback_cursor.clone();
-            let capture_feedback_frame_id = capture_feedback_frame_id.clone();
+            let capture_preview_nonce = capture_preview_nonce.clone();
+            let frozen_preview_url = frozen_preview_url.clone();
+            let current_device_id = current_device_id.clone();
+            let current_mode_id = current_mode_id.clone();
             playing.set(false);
-            capture_feedback_frame_id.set(
-                current_project_for_capture
-                    .as_ref()
-                    .and_then(|project| project.frames.last().map(|frame| frame.id)),
-            );
-            live_preview_enabled.set(false);
+            live_preview_enabled.set(true);
+            let next_capture_nonce = (*capture_preview_nonce).wrapping_add(1);
+            capture_preview_nonce.set(next_capture_nonce);
+            frozen_preview_url.set(snapshot.preview_still_url.clone().map(|url| {
+                format!(
+                    "{url}?device={current_device_id}&mode={current_mode_id}&capture={next_capture_nonce}"
+                )
+            }));
             *playback_cursor.borrow_mut() = 0;
             spawn_local(async move {
                 if let Ok(next_snapshot) =
@@ -503,10 +529,10 @@ pub fn app() -> Html {
                 {
                     playing.set(false);
                     live_preview_enabled.set(true);
-                    capture_feedback_frame_id.set(None);
+                    frozen_preview_url.set(None);
                     sync_snapshot(snapshot, project_cache, selected_frame_id, next_snapshot);
                 } else {
-                    capture_feedback_frame_id.set(None);
+                    frozen_preview_url.set(None);
                 }
             });
         })
@@ -582,24 +608,149 @@ pub fn app() -> Html {
         })
     };
 
+    {
+        let on_capture = on_capture.clone();
+        let on_delete = on_delete.clone();
+        let keyboard_busy = snapshot.status.busy;
+        let keyboard_has_camera = snapshot.selected_camera.is_some();
+
+        use_effect_with(
+            (
+                keyboard_busy,
+                keyboard_has_camera,
+                on_capture.clone(),
+                on_delete.clone(),
+            ),
+            move |(keyboard_busy, keyboard_has_camera, on_capture, on_delete)| {
+                let window = window().expect("no window");
+                let keyboard_busy = *keyboard_busy;
+                let keyboard_has_camera = *keyboard_has_camera;
+                let on_capture = on_capture.clone();
+                let on_delete = on_delete.clone();
+
+                let handler = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+                    move |event: web_sys::KeyboardEvent| {
+                        // ignore if typing in an input control
+                        if let Some(target) = event.target() {
+                            if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                                let is_capture_from_toggle = event.code() == "Space"
+                                    && matches!(input.type_().as_str(), "checkbox" | "range");
+                                if !is_capture_from_toggle {
+                                    return;
+                                }
+                            } else if target.dyn_ref::<HtmlSelectElement>().is_some()
+                                || target.dyn_ref::<HtmlTextAreaElement>().is_some()
+                            {
+                                return;
+                            }
+                        }
+
+                        if event.repeat() {
+                            return;
+                        }
+
+                        if event.code() == "Space" {
+                            event.prevent_default();
+
+                            if let Some(target) = event.target() {
+                                if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                                    let _ = input.blur();
+                                }
+                            }
+
+                            if !keyboard_busy && keyboard_has_camera {
+                                on_capture.emit(());
+                            }
+                        } else if event.key() == "Delete" {
+                            event.prevent_default();
+
+                            if !keyboard_busy {
+                                on_delete.emit(());
+                            }
+                        }
+                    },
+                ));
+
+                window
+                    .add_event_listener_with_callback("keydown", handler.as_ref().unchecked_ref())
+                    .unwrap();
+
+                move || {
+                    window
+                        .remove_event_listener_with_callback(
+                            "keydown",
+                            handler.as_ref().unchecked_ref(),
+                        )
+                        .unwrap();
+                }
+            },
+        );
+    }
+
     let on_export = {
         let snapshot = snapshot.clone();
         let project_cache = project_cache.clone();
         let selected_frame_id = selected_frame_id.clone();
+        let export_modal = export_modal.clone();
         Callback::from(move |_| {
             let snapshot = snapshot.clone();
             let project_cache = project_cache.clone();
             let selected_frame_id = selected_frame_id.clone();
+            let export_modal = export_modal.clone();
             spawn_local(async move {
                 if let Ok(Some(path)) =
                     invoke_command::<Option<String>, _>("pick_export_path", &EmptyArgs {}).await
                 {
-                    if let Ok(next_snapshot) =
-                        invoke_command::<AppSnapshot, _>("export_mp4", &PathArg { path }).await
+                    export_modal.set(ExportModalState {
+                        visible: true,
+                        completed: false,
+                        export_path: Some(path.clone()),
+                    });
+
+                    match invoke_command::<AppSnapshot, _>(
+                        "export_mp4",
+                        &PathArg { path: path.clone() },
+                    )
+                    .await
                     {
-                        sync_snapshot(snapshot, project_cache, selected_frame_id, next_snapshot);
+                        Ok(next_snapshot) => {
+                            sync_snapshot(
+                                snapshot,
+                                project_cache,
+                                selected_frame_id,
+                                next_snapshot,
+                            );
+                            export_modal.set(ExportModalState {
+                                visible: true,
+                                completed: true,
+                                export_path: Some(path),
+                            });
+                        }
+                        Err(error) => {
+                            export_modal.set(ExportModalState::default());
+                            set_command_error(snapshot, error);
+                        }
                     }
                 }
+            });
+        })
+    };
+
+    let on_close_export_modal = {
+        let export_modal = export_modal.clone();
+        Callback::from(move |_| {
+            export_modal.set(ExportModalState::default());
+        })
+    };
+
+    let on_open_export_folder = {
+        let export_modal = export_modal.clone();
+        Callback::from(move |_| {
+            let Some(path) = export_modal.export_path.clone() else {
+                return;
+            };
+            spawn_local(async move {
+                let _ = invoke_command::<(), _>("reveal_export_in_folder", &PathArg { path }).await;
             });
         })
     };
@@ -730,6 +881,71 @@ pub fn app() -> Html {
         event.stop_propagation();
     });
 
+    fn to_mouse_cb(cb: Callback<()>) -> Callback<MouseEvent> {
+        Callback::from(move |_| cb.emit(()))
+    }
+
+    let capture_icon = html! {
+        <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+                d="M8 7 9.5 5h5L16 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.8"
+            />
+            <circle
+                cx="12"
+                cy="13"
+                r="3.25"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+            />
+        </svg>
+    };
+
+    let delete_icon = html! {
+        <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+                d="M4 7h16M9 3h6m-7 4v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V7"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.8"
+            />
+            <path
+                d="M10 11v5m4-5v5"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-width="1.8"
+            />
+        </svg>
+    };
+
+    let playback_icon = if *playing {
+        html! {
+            <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 7h2.75v10H9zm4.25 0H16v10h-2.75z" fill="currentColor" />
+            </svg>
+        }
+    } else {
+        html! {
+            <svg class="control-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                    d="M8.5 6.75v10.5L17 12 8.5 6.75Z"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    stroke-linejoin="round"
+                    stroke-width="1.1"
+                />
+            </svg>
+        }
+    };
+
     html! {
         <main class={app_shell_classes}>
 
@@ -741,19 +957,11 @@ pub fn app() -> Html {
                                 <div class="panel-card panel-card--actions">
                                     <div class="panel-heading">
                                         <p class="panel-kicker">{"Controls"}</p>
-                                        <h2>{"Actions"}</h2>
                                     </div>
-                                    <p class="panel-copy">{"Welcome to Jind stop motion software"}</p>
-                                    <div class="action-grid">
-                                        <button class="primary" onclick={on_capture} disabled={busy || snapshot.selected_camera.is_none()}>{"Capture"}</button>
-                                        <button class="danger" onclick={on_delete} disabled={busy || delete_target_frame_id.is_none()}>{"Delete frame"}</button>
-                                        <button class="secondary" onclick={on_toggle_playback} disabled={current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
-                                            { if *playing { "Stop" } else { "Play" } }
+                                    <button class="secondary preview-camera-button" onclick={on_open_camera_modal.clone()} disabled={busy}>
+                                            {"Capture source"}
                                         </button>
-                                        <button class="secondary" onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
-                                            {"Export MP4"}
-                                        </button>
-                                    </div>
+
                                     <label class="toggle">
                                         <input
                                             class="toggle-input"
@@ -772,7 +980,7 @@ pub fn app() -> Html {
                                         <span>{"Onion skin"}</span>
                                     </label>
                                     <label class="field slider-field">
-                                        <span>{format!("Onion opacity {}%", *onion_skin_opacity)}</span>
+                                        <span>{format!("Onion strength {}%", *onion_skin_opacity)}</span>
                                         <input
                                             class="slider-input"
                                             type="range"
@@ -793,9 +1001,46 @@ pub fn app() -> Html {
                                             }}
                                         />
                                     </label>
+
+                                    <button class="timeline-count" onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
+                                        {format!("Export {} frames", frame_count) }
+                                        // {format!(" {} seconds", frame_count/15)} // need to add seconds/minutes counter
+                                    </button> // combine export with frame count thingy
+
+                                    <div class="action-grid">
+                                        <button
+                                            class="primary icon-button"
+                                            onclick={to_mouse_cb(on_capture.clone())}
+                                            disabled={busy || snapshot.selected_camera.is_none()}
+                                            aria-label="Capture frame"
+                                            title="Capture frame"
+                                        >
+                                            {capture_icon}
+                                        </button>
+                                        <button
+                                            class="danger icon-button"
+                                            onclick={to_mouse_cb(on_delete.clone())}
+                                            disabled={busy || delete_target_frame_id.is_none()}
+                                            aria-label="Delete frame"
+                                            title="Delete frame"
+                                        >
+                                            {delete_icon}
+                                        </button>
+                                        <button
+                                            class="secondary icon-button"
+                                            onclick={on_toggle_playback}
+                                            disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
+                                            aria-label={if *playing { "Pause playback" } else { "Start playback" }}
+                                            title={if *playing { "Pause playback" } else { "Start playback" }}
+                                        >
+                                            {playback_icon}
+                                        </button>
+                                    </div>
+
                                     {
                                         if !snapshot.ffmpeg_available {
-                                            html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled"}</p> }
+                                            html! {}
+                                            // html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled"}</p> }
                                         } else {
                                             html! {}
                                         }
@@ -805,41 +1050,45 @@ pub fn app() -> Html {
 
                             <section class="workspace">
                                 <div class="preview-card">
-                                    <div class="preview-header">
-                                        <div class="preview-title">
-                                            <p class="panel-kicker">{"Viewport"}</p>
-                                            <h2>{"Preview"}</h2>
-                                        </div>
-                                        <button class="secondary preview-camera-button" onclick={on_open_camera_modal.clone()}>
-                                            {"Camera"}
-                                        </button>
-                                    </div>
                                     <div class="preview-stage">
-                                        <div class="preview-stage-label">{"Camera preview"}</div>
                                         {
                                             if busy {
-                                                capture_feedback_frame.map(|frame| html! {
-                                                    <img class="preview-image" src={frame.image_url.clone()} alt="latest frame" />
-                                                }).unwrap_or_else(|| {
-                                                    if let Some(preview_stream_url) = preview_stream_url.clone() {
-                                                        html! {
-                                                            <>
-                                                                <img class="preview-image" src={preview_stream_url} alt="live preview here" />
-                                                                {
-                                                                    if *onion_skin_enabled {
-                                                                        live_onion_frame.map(|frame| html! {
-                                                                            <img class="preview-image onion-layer" style={onion_skin_style.clone()} src={frame.image_url.clone()} alt="onion skin" />
-                                                                        }).unwrap_or_default()
-                                                                    } else {
-                                                                        html! {}
-                                                                    }
+                                                if let Some(preview_still_url) = (*frozen_preview_url)
+                                                    .clone()
+                                                    .or_else(|| preview_still_url.clone())
+                                                {
+                                                    html! {
+                                                        <>
+                                                            <img class="preview-image" src={preview_still_url} alt="Frozen live preview" />
+                                                            {
+                                                                if *onion_skin_enabled {
+                                                                    live_onion_frame.map(|frame| html! {
+                                                                        <img class="preview-image onion-layer" style={onion_skin_style.clone()} src={frame.image_url.clone()} alt="Onion skin frame" />
+                                                                    }).unwrap_or_default()
+                                                                } else {
+                                                                    html! {}
                                                                 }
-                                                            </>
-                                                        }
-                                                    } else {
-                                                        html! { <div class="preview-placeholder">{"Processing capture..."}</div> }
+                                                            }
+                                                        </>
                                                     }
-                                                })
+                                                } else if let Some(preview_stream_url) = preview_stream_url.clone() {
+                                                    html! {
+                                                        <>
+                                                            <img class="preview-image" src={preview_stream_url} alt="Live preview" />
+                                                            {
+                                                                if *onion_skin_enabled {
+                                                                    live_onion_frame.map(|frame| html! {
+                                                                        <img class="preview-image onion-layer" style={onion_skin_style.clone()} src={frame.image_url.clone()} alt="Onion skin frame" />
+                                                                    }).unwrap_or_default()
+                                                                } else {
+                                                                    html! {}
+                                                                }
+                                                            }
+                                                        </>
+                                                    }
+                                                } else {
+                                                    html! { <div class="preview-placeholder">{"Capturing..."}</div> }
+                                                }
                                             } else if let Some(preview_stream_url) = preview_stream_url.clone() {
                                                 html! {
                                                     <>
@@ -865,165 +1114,179 @@ pub fn app() -> Html {
                                         }
                                     </div>
                                 </div>
-
-                                <div class="timeline-card timeline-card--dock">
-                                    <div class="timeline-header">
-                                        <div>
-                                            <p class="panel-kicker">{"Frames"}</p>
-                                            <h2>{"Timeline"}</h2>
-                                        </div>
-                                        <span class="timeline-count">{format!("{} frames", frame_count)}</span>
-                                    </div>
-                                    <div class="timeline-strip">
-                                        {
-                                            current_project.as_ref().map(|project| {
-                                                html! {
-                                                    <>
-                                                        { for project.frames.iter().map(|frame| {
-                                                            let frame_id = frame.id;
-                                                            let selected_frame_id = selected_frame_id.clone();
-                                                            let dragged_frame_id = dragged_frame_id.clone();
-                                                            let live_preview_enabled = live_preview_enabled.clone();
-                                                            let live_preview_for_click = live_preview_enabled.clone();
-                                                            let playing = playing.clone();
-                                                            let playing_for_click = playing.clone();
-                                                            let snapshot = snapshot.clone();
-                                                            let drop_selected_frame = selected_frame_id.clone();
-                                                            let project_cache = project_cache.clone();
-                                                            let drag_start_state = dragged_frame_id.clone();
-                                                            let drag_drop_state = dragged_frame_id.clone();
-                                                            let ondragstart = Callback::from(move |_| {
-                                                                drag_start_state.set(Some(frame_id));
-                                                            });
-                                                            let ondragover = Callback::from(move |event: DragEvent| {
-                                                                event.prevent_default();
-                                                            });
-                                                            let ondrop = Callback::from(move |event: DragEvent| {
-                                                                event.prevent_default();
-                                                                let Some(source_id) = *drag_drop_state else {
-                                                                    return;
-                                                                };
-                                                                if source_id == frame_id || snapshot.status.busy {
-                                                                    return;
-                                                                }
-
-                                                                let Some(project) = snapshot.project.as_ref() else {
-                                                                    return;
-                                                                };
-                                                                let mut order: Vec<u64> = project.frames.iter().map(|item| item.id).collect();
-                                                                let Some(source_index) = order.iter().position(|id| *id == source_id) else {
-                                                                    return;
-                                                                };
-                                                                let Some(target_index) = order.iter().position(|id| *id == frame_id) else {
-                                                                    return;
-                                                                };
-                                                                let moved = order.remove(source_index);
-                                                                order.insert(target_index, moved);
-
-                                                                let snapshot = snapshot.clone();
-                                                                let drop_selected_frame = drop_selected_frame.clone();
-                                                                let project_cache = project_cache.clone();
-                                                                spawn_local(async move {
-                                                                    if let Ok(next_snapshot) = invoke_command::<AppSnapshot, _>(
-                                                                        "reorder_frames",
-                                                                        &ReorderFramesArg { frame_ids_in_order: order },
-                                                                    )
-                                                                    .await
-                                                                    {
-                                                                        sync_snapshot(
-                                                                            snapshot,
-                                                                            project_cache.clone(),
-                                                                            drop_selected_frame,
-                                                                            next_snapshot,
-                                                                        );
-                                                                    }
-                                                                });
-                                                            });
-                                                            let onclick = Callback::from(move |_| {
-                                                                playing_for_click.set(false);
-                                                                live_preview_for_click.set(false);
-                                                                selected_frame_id.set(Some(frame_id));
-                                                            });
-
-                                                            html! {
-                                                                <button
-                                                                    id={format!("timeline-frame-{}", frame.id)}
-                                                                    class={classes!(
-                                                                        "timeline-frame",
-                                                                        (!*live_preview_enabled && active_selected_frame_id == Some(frame.id)).then_some("selected")
-                                                                    )}
-                                                                    draggable="true"
-                                                                    {ondragstart}
-                                                                    {ondragover}
-                                                                    {ondrop}
-                                                                    {onclick}
-                                                                    disabled={busy}
-                                                                >
-                                                                    <img src={frame.thumb_url.clone()} alt="Frame thumbnail" />
-                                                                    <span>{format!("#{}", frame.id)}</span>
-                                                                </button>
-                                                            }
-                                                        }) }
-                                                        <button
-                                                            id="timeline-live-proxy"
-                                                            class={classes!("timeline-frame", "timeline-live-proxy", (*live_preview_enabled && !*playing).then_some("selected"))}
-                                                            onclick={{
-                                                                let live_preview_enabled = live_preview_enabled.clone();
-                                                                let playing = playing.clone();
-                                                                Callback::from(move |_| {
-                                                                    playing.set(false);
-                                                                    live_preview_enabled.set(true);
-                                                                })
-                                                            }}
-                                                            disabled={busy || snapshot.selected_camera.is_none()}
-                                                        >
-                                                            <div class="timeline-live-thumb">{"Live"}</div>
-                                                            <span>{"Live Preview"}</span>
-                                                        </button>
-                                                    </>
-                                                }
-                                            }).unwrap_or_default()
-                                        }
-                                    </div>
-                                </div>
                             </section>
+
+                            <div class="timeline-card timeline-card--dock">
+                                // <div class="timeline-header">
+                                //     <div>
+                                //         // <p class="panel-kicker">{"Frames"}</p>
+                                //         <h2>{"Timeline"}</h2>
+                                //     </div>
+                                // </div>
+                                <div class="timeline-strip">
+                                    {
+                                        current_project.as_ref().map(|project| {
+                                            html! {
+                                                <>
+                                                    { for project.frames.iter().map(|frame| {
+                                                        let frame_id = frame.id;
+                                                        let selected_frame_id = selected_frame_id.clone();
+                                                        let dragged_frame_id = dragged_frame_id.clone();
+                                                        let live_preview_enabled = live_preview_enabled.clone();
+                                                        let live_preview_for_click = live_preview_enabled.clone();
+                                                        let playing = playing.clone();
+                                                        let playing_for_click = playing.clone();
+                                                        let snapshot = snapshot.clone();
+                                                        let drop_selected_frame = selected_frame_id.clone();
+                                                        let project_cache = project_cache.clone();
+                                                        let drag_start_state = dragged_frame_id.clone();
+                                                        let drag_drop_state = dragged_frame_id.clone();
+                                                        let ondragstart = Callback::from(move |_| {
+                                                            drag_start_state.set(Some(frame_id));
+                                                        });
+                                                        let ondragover = Callback::from(move |event: DragEvent| {
+                                                            event.prevent_default();
+                                                        });
+                                                        let ondrop = Callback::from(move |event: DragEvent| {
+                                                            event.prevent_default();
+                                                            let Some(source_id) = *drag_drop_state else {
+                                                                return;
+                                                            };
+                                                            if source_id == frame_id || snapshot.status.busy {
+                                                                return;
+                                                            }
+
+                                                            let Some(project) = snapshot.project.as_ref() else {
+                                                                return;
+                                                            };
+                                                            let mut order: Vec<u64> = project.frames.iter().map(|item| item.id).collect();
+                                                            let Some(source_index) = order.iter().position(|id| *id == source_id) else {
+                                                                return;
+                                                            };
+                                                            let Some(target_index) = order.iter().position(|id| *id == frame_id) else {
+                                                                return;
+                                                            };
+                                                            let moved = order.remove(source_index);
+                                                            order.insert(target_index, moved);
+
+                                                            let snapshot = snapshot.clone();
+                                                            let drop_selected_frame = drop_selected_frame.clone();
+                                                            let project_cache = project_cache.clone();
+                                                            spawn_local(async move {
+                                                                if let Ok(next_snapshot) = invoke_command::<AppSnapshot, _>(
+                                                                    "reorder_frames",
+                                                                    &ReorderFramesArg { frame_ids_in_order: order },
+                                                                )
+                                                                .await
+                                                                {
+                                                                    sync_snapshot(
+                                                                        snapshot,
+                                                                        project_cache.clone(),
+                                                                        drop_selected_frame,
+                                                                        next_snapshot,
+                                                                    );
+                                                                }
+                                                            });
+                                                        });
+                                                        let onclick = Callback::from(move |_| {
+                                                            playing_for_click.set(false);
+                                                            live_preview_for_click.set(false);
+                                                            selected_frame_id.set(Some(frame_id));
+                                                        });
+
+                                                        html! {
+                                                            <button
+                                                                id={format!("timeline-frame-{}", frame.id)}
+                                                                class={classes!(
+                                                                    "timeline-frame",
+                                                                    (!*live_preview_enabled && active_selected_frame_id == Some(frame.id)).then_some("selected")
+                                                                )}
+                                                                draggable="true"
+                                                                {ondragstart}
+                                                                {ondragover}
+                                                                {ondrop}
+                                                                {onclick}
+                                                                disabled={busy}
+                                                            >
+                                                                <img src={frame.thumb_url.clone()} alt="Frame thumbnail" />
+                                                                // <span>{format!("#{}", frame.id)}</span>
+                                                            </button>
+                                                        }
+                                                    }) }
+                                                    <button
+                                                        id="timeline-live-proxy"
+                                                        class={classes!("timeline-frame", "timeline-live-proxy", (*live_preview_enabled && !*playing).then_some("selected"))}
+                                                        onclick={{
+                                                            let live_preview_enabled = live_preview_enabled.clone();
+                                                            let playing = playing.clone();
+                                                            Callback::from(move |_| {
+                                                                playing.set(false);
+                                                                live_preview_enabled.set(true);
+                                                            })
+                                                        }}
+                                                        disabled={busy || snapshot.selected_camera.is_none()}
+                                                    >
+                                                        <div class="timeline-live-thumb">{"Live"}</div>
+                                                        <center>
+                                                        <span>{"Live Preview"}</span>
+                                                        </center>
+                                                    </button>
+                                                </>
+                                            }
+                                        }).unwrap_or_default()
+                                    }
+                                </div>
+                            </div>
                         </section>
                     }
                 } else {
                     html! {
                     <div>
 
-                    <section class="status-strip">
-                <div class="status-pill">
-                    // <span class="status-dot"></span>
-                    // <div class="status-copy">
-                        // <span class="status-kicker">{"System status"}</span>
-                        // <strong>{status_phase_label(&snapshot.status)}</strong>
-                        // <span>{status_line.clone()}</span>
-                    // </div>
-                </div>
-                {
-                    if let Some(project) = current_project.as_ref() {
-                        html! {
-                            <div class="project-meta">
-                                <span title={project.project_path.clone()}>{project.project_path.clone()}</span>
-                                <span>{format!("{} FPS", project.fps)}</span>
-                                <span>{resolution_label.clone()}</span>
-                            </div>
-                        }
-                    } else {
-                        html! { <div class="project-meta"><span>{"Developed at Byte Labs"}</span></div> }
-                    }
-                }
-            </section>
+            // <section class="status-strip">
+            //     <div class="status-pill">
+            //         // <span class="status-dot"></span>
+            //         // <div class="status-copy">
+            //             // <span class="status-kicker">{"System status"}</span>
+            //             // <strong>{status_phase_label(&snapshot.status)}</strong>
+            //             // <span>{status_line.clone()}</span>
+            //         // </div>
+            //     </div>
+            //     {
+            //         if let Some(project) = current_project.as_ref() {
+            //             html! {
+            //                 <div class="project-meta">
+            //                     <span title={project.project_path.clone()}>{project.project_path.clone()}</span>
+            //                     <span>{format!("{} FPS", project.fps)}</span>
+            //                     <span>{resolution_label.clone()}</span>
+            //                 </div>
+            //             }
+            //         } else {
+            //             html! {  }
+            //         }
+            //     }
+            // </section>
                         <section class="welcome-shell">
                             <div class="hero-card">
                                 <div class="hero-layout">
+                                    <figure class="maharani-card">
+                                        <div class="maharani-frame">
+                                            <img src="public/original.png" alt="Portrait of Maharani Jind Kaur" />
+                                        </div>
+                                        // <figcaption>
+                                        //     <span class="maharani-label">{"Maharani Jind Kaur"}</span>
+                                        //     <span class="maharani-caption">
+                                        //         {"Queen of the Sikh Empire and the namesake behind Jind."}
+                                        //     </span>
+                                        // </figcaption>
+                                    </figure>
                                     <div class="hero-copy-block">
+                                    // <div class="project-meta"><span>{"Written in rust"}</span></div>
                                         <p class="eyebrow">{"Release v0.1 Alpha"}</p>
-                                        <h1>{"Welcome to Jind stop motion"}</h1>
+                                        <h1>{"Jind stop motion"}</h1>
                                         <p class="hero-copy">
-                                            {"Jind means \"life\" or \"soul\""}
+                                            // {"Jind means \"life\" or \"soul\""}
+                                            {"yes, we wrote it in rust"}
                                         </p>
                                         <div class="hero-actions">
                                             <button class="primary" onclick={on_create_project} disabled={busy}>{"New Project"}</button>
@@ -1049,20 +1312,53 @@ pub fn app() -> Html {
                             </div>
                         </div>
                     }
+                } else if export_modal.visible {
+                    html! {
+                        <div class="modal-scrim">
+                            <div class="modal-card export-modal">
+                                {
+                                    if export_modal.completed {
+                                        html! {
+                                            <>
+                                                <h2>{"Export Complete"}</h2>
+                                                <p>{"MP4 export is complete"}</p>
+                                                <div class="export-actions">
+                                                    <button class="primary" onclick={on_open_export_folder.clone()}>
+                                                        {"Open Folder"}
+                                                    </button>
+                                                    <button class="secondary" onclick={on_close_export_modal.clone()}>
+                                                        {"Close"}
+                                                    </button>
+                                                </div>
+                                            </>
+                                        }
+                                    } else {
+                                        html! {
+                                            <>
+                                                <div class="export-loader" aria-hidden="true"></div>
+                                                <h2>{"Exporting"}</h2>
+                                                <p>{"Rendering your MP4. This can take a moment."}</p>
+                                            </>
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
                 } else if *camera_modal_open {
                     html! {
                         <div class="modal-scrim" onclick={on_close_camera_modal.clone()}>
                             <div class="modal-card camera-modal" onclick={on_camera_modal_card_click}>
                                 <div class="panel-heading">
                                     <div>
-                                        <p class="panel-kicker">{"Capture setup"}</p>
-                                        <h2>{"Camera"}</h2>
+                                        <p class="panel-kicker">{"Choose the camera input and resolution"}</p>
+                                        // <h2>{"Camera"}</h2>
                                     </div>
-                                    <button class="secondary modal-close-button" onclick={on_close_camera_modal.clone()}>
+                                    <button class="secondary modal-close-button" onclick={on_close_camera_modal.clone()} disabled={busy}>
                                         {"Close"}
                                     </button>
                                 </div>
-                                <p class="panel-copy">{"Choose the camera input and mode before you capture the next frame."}</p>
+
                                 {
                                     if cameras.is_empty() {
                                         html! { <p class="muted">{"No usable `/dev/video*` camera was found."}</p> }

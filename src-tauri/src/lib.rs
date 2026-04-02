@@ -16,6 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 use tempfile::{tempdir, TempDir};
 use v4l::buffer::Type;
 use v4l::format::FourCC;
@@ -87,6 +88,7 @@ struct PreviewBroadcast {
 struct PreviewStreamState {
     jpeg: Option<Vec<u8>>,
     version: u64,
+    freeze_depth: u32,
 }
 
 #[derive(Clone)]
@@ -132,6 +134,7 @@ struct AppSnapshot {
     selected_camera: Option<SelectedCameraView>,
     ffmpeg_available: bool,
     preview_url: Option<String>,
+    preview_still_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +283,7 @@ impl MediaServer {
             state: Mutex::new(PreviewStreamState {
                 jpeg: None,
                 version: 0,
+                freeze_depth: 0,
             }),
             ready: Condvar::new(),
         });
@@ -320,14 +324,28 @@ impl MediaServer {
 
     fn set_preview_jpeg(&self, jpeg: Vec<u8>) {
         let mut state = self.preview_state.state.lock().unwrap();
+        if state.freeze_depth > 0 {
+            return;
+        }
         state.jpeg = Some(jpeg);
         state.version = state.version.wrapping_add(1);
         self.preview_state.ready.notify_all();
     }
 
+    fn freeze_preview(&self) {
+        let mut state = self.preview_state.state.lock().unwrap();
+        state.freeze_depth = state.freeze_depth.saturating_add(1);
+    }
+
+    fn unfreeze_preview(&self) {
+        let mut state = self.preview_state.state.lock().unwrap();
+        state.freeze_depth = state.freeze_depth.saturating_sub(1);
+    }
+
     fn clear_preview(&self) {
         let mut state = self.preview_state.state.lock().unwrap();
         state.jpeg = None;
+        state.freeze_depth = 0;
         state.version = state.version.wrapping_add(1);
         self.preview_state.ready.notify_all();
     }
@@ -421,7 +439,10 @@ async fn capture_frame(
 ) -> Result<AppSnapshot, String> {
     let app_for_task = app.clone();
     run_locked_mutation(state, app, "Capturing frame...", move |shared| {
-        capture_frame_impl(shared, &app_for_task)?;
+        shared.media_server.freeze_preview();
+        let result = capture_frame_impl(shared.clone(), &app_for_task);
+        shared.media_server.unfreeze_preview();
+        result?;
         Ok("Frame captured and autosaved.".to_string())
     })
     .await
@@ -464,6 +485,13 @@ async fn export_mp4(
         Ok("Export finished.".to_string())
     })
     .await
+}
+
+#[tauri::command]
+fn reveal_export_in_folder(path: String, app: AppHandle) -> Result<(), String> {
+    app.opener()
+        .reveal_item_in_dir(normalize_export_path(Path::new(&path)))
+        .map_err(error_to_string)
 }
 
 async fn run_locked_mutation<F>(
@@ -1244,6 +1272,10 @@ fn build_snapshot(inner: &AppInner, media_base_url: Option<&str>) -> Result<AppS
             .selected_camera
             .as_ref()
             .and_then(|_| media_base_url.map(|base_url| format!("{base_url}/preview.mjpg"))),
+        preview_still_url: inner
+            .selected_camera
+            .as_ref()
+            .and_then(|_| media_base_url.map(|base_url| format!("{base_url}/preview.jpg"))),
     })
 }
 
@@ -1307,6 +1339,10 @@ fn serve_media_client(
 
     if path == "/preview.mjpg" {
         return serve_preview_stream(stream, preview_state);
+    }
+
+    if path == "/preview.jpg" {
+        return serve_preview_still(&mut stream, preview_state);
     }
 
     if let Some((frame_id, thumb)) = parse_frame_request(path) {
@@ -1400,6 +1436,19 @@ fn serve_preview_stream(mut stream: TcpStream, preview_state: Arc<PreviewBroadca
         stream.write_all(b"\r\n")?;
         stream.flush()?;
     }
+}
+
+fn serve_preview_still(stream: &mut TcpStream, preview_state: Arc<PreviewBroadcast>) -> Result<()> {
+    let jpeg = {
+        let state = preview_state.state.lock().unwrap();
+        state.jpeg.clone()
+    };
+
+    let Some(jpeg) = jpeg else {
+        return write_http_error(stream, 503, "Preview not ready");
+    };
+
+    write_http_bytes(stream, "200 OK", "image/jpeg", &jpeg)
 }
 
 fn write_http_bytes(
@@ -1572,7 +1621,8 @@ pub fn run() {
             capture_frame,
             delete_frame,
             reorder_frames,
-            export_mp4
+            export_mp4,
+            reveal_export_in_folder
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
