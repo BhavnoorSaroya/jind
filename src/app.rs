@@ -359,34 +359,10 @@ pub fn app() -> Html {
         );
     }
 
-    let status_line = snapshot
-        .status
-        .detail
-        .clone()
-        .or_else(|| {
-            snapshot
-                .status
-                .last_result
-                .as_ref()
-                .map(|last| last.message.clone())
-        })
-        .unwrap_or_else(|| {
-            if has_project {
-                "Ready.".to_string()
-            } else {
-                "Create or open a `.jind` project to begin.".to_string()
-            }
-        });
-
     let frame_count = current_project
         .as_ref()
         .map(|project| project.frames.len())
         .unwrap_or(0);
-    let resolution_label = current_project
-        .as_ref()
-        .and_then(|project| project.resolution.as_ref())
-        .map(|resolution| format!("{}x{}", resolution.width, resolution.height))
-        .unwrap_or_else(|| "Resolution unlocks on first capture".to_string());
     let app_shell_classes = classes!(
         "app-shell",
         has_project.then_some("app-shell--project"),
@@ -608,9 +584,68 @@ pub fn app() -> Html {
         })
     };
 
+    let on_select_adjacent_frame = {
+        let frame_ids = current_project
+            .as_ref()
+            .map(|project| {
+                project
+                    .frames
+                    .iter()
+                    .map(|frame| frame.id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let selected_frame_id = selected_frame_id.clone();
+        let live_preview_enabled = live_preview_enabled.clone();
+        let playing = playing.clone();
+        let active_selected_frame_id = active_selected_frame_id;
+
+        Callback::from(move |step: i32| {
+            if frame_ids.is_empty() {
+                return;
+            }
+
+            let current_index = if *live_preview_enabled && !*playing {
+                Some(frame_ids.len())
+            } else {
+                active_selected_frame_id.and_then(|frame_id| {
+                    frame_ids
+                        .iter()
+                        .position(|candidate| *candidate == frame_id)
+                })
+            };
+
+            let next_index = if step < 0 {
+                match current_index {
+                    Some(index) if index > 0 => Some(index - 1),
+                    None => frame_ids.len().checked_sub(1),
+                    _ => None,
+                }
+            } else {
+                match current_index {
+                    Some(index) if index + 1 < frame_ids.len() => Some(index + 1),
+                    None => Some(0),
+                    _ => None,
+                }
+            };
+
+            let Some(next_index) = next_index else {
+                return;
+            };
+            let Some(frame_id) = frame_ids.get(next_index) else {
+                return;
+            };
+
+            playing.set(false);
+            live_preview_enabled.set(false);
+            selected_frame_id.set(Some(*frame_id));
+        })
+    };
+
     {
         let on_capture = on_capture.clone();
         let on_delete = on_delete.clone();
+        let on_select_adjacent_frame = on_select_adjacent_frame.clone();
         let keyboard_busy = snapshot.status.busy;
         let keyboard_has_camera = snapshot.selected_camera.is_some();
 
@@ -620,13 +655,21 @@ pub fn app() -> Html {
                 keyboard_has_camera,
                 on_capture.clone(),
                 on_delete.clone(),
+                on_select_adjacent_frame.clone(),
             ),
-            move |(keyboard_busy, keyboard_has_camera, on_capture, on_delete)| {
+            move |(
+                keyboard_busy,
+                keyboard_has_camera,
+                on_capture,
+                on_delete,
+                on_select_adjacent_frame,
+            )| {
                 let window = window().expect("no window");
                 let keyboard_busy = *keyboard_busy;
                 let keyboard_has_camera = *keyboard_has_camera;
                 let on_capture = on_capture.clone();
                 let on_delete = on_delete.clone();
+                let on_select_adjacent_frame = on_select_adjacent_frame.clone();
 
                 let handler = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
                     move |event: web_sys::KeyboardEvent| {
@@ -666,6 +709,28 @@ pub fn app() -> Html {
 
                             if !keyboard_busy {
                                 on_delete.emit(());
+                            }
+                        } else if event.key() == "ArrowLeft" {
+                            event.prevent_default();
+
+                            if !keyboard_busy {
+                                if let Some(target) = event.target() {
+                                    if let Some(element) = target.dyn_ref::<HtmlElement>() {
+                                        let _ = element.blur();
+                                    }
+                                }
+                                on_select_adjacent_frame.emit(-1);
+                            }
+                        } else if event.key() == "ArrowRight" {
+                            event.prevent_default();
+
+                            if !keyboard_busy {
+                                if let Some(target) = event.target() {
+                                    if let Some(element) = target.dyn_ref::<HtmlElement>() {
+                                        let _ = element.blur();
+                                    }
+                                }
+                                on_select_adjacent_frame.emit(1);
                             }
                         }
                     },
@@ -925,7 +990,7 @@ pub fn app() -> Html {
                 if has_project {
                     html! {
                         <section class="editor-shell">
-                            <aside class="control-panel">
+                            <div class="control-panel">
                                 <div class="panel-card panel-card--actions">
                                     <div class="panel-heading">
                                         <p class="panel-kicker">{"Controls"}</p>
@@ -976,49 +1041,17 @@ pub fn app() -> Html {
 
                                     <button class="timeline-count" onclick={on_export} disabled={busy || !snapshot.ffmpeg_available || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}>
                                         {format!("Export {} frames", frame_count) }
-                                        // {format!(" {} seconds", frame_count/15)} // need to add seconds/minutes counter
-                                    </button> // combine export with frame count thingy
-
-                                    <div class="action-grid">
-                                        // <button
-                                        //     class="primary icon-button"
-                                        //     onclick={to_mouse_cb(on_capture.clone())}
-                                        //     disabled={busy || snapshot.selected_camera.is_none()}
-                                        //     aria-label="Capture frame"
-                                        //     title="Capture frame"
-                                        // >
-                                        //     {capture_icon}
-                                        // </button>
-                                        // <button
-                                        //     class="danger icon-button"
-                                        //     onclick={to_mouse_cb(on_delete.clone())}
-                                        //     disabled={busy || delete_target_frame_id.is_none()}
-                                        //     aria-label="Delete frame"
-                                        //     title="Delete frame"
-                                        // >
-                                        //     {delete_icon}
-                                        // </button>
-                                        // <button
-                                        //     class="secondary icon-button"
-                                        //     onclick={on_toggle_playback}
-                                        //     disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
-                                        //     aria-label={if *playing { "Pause playback" } else { "Start playback" }}
-                                        //     title={if *playing { "Pause playback" } else { "Start playback" }}
-                                        // >
-                                        //     {playback_icon}
-                                        // </button>
-                                    </div>
+                                    </button>
 
                                     {
                                         if !snapshot.ffmpeg_available {
                                             html! {}
-                                            // html! { <p class="muted">{"`ffmpeg` not on PATH, export is disabled"}</p> }
                                         } else {
                                             html! {}
                                         }
                                     }
                                 </div>
-                            </aside>
+                            </div>
 
                             <section class="workspace">
                                 <div class="preview-card">
@@ -1090,38 +1123,33 @@ pub fn app() -> Html {
 
                             <div class="timeline-card timeline-card--dock">
                                 <div class="timeline-header">
-                                    // <div>
-                                        // <p class="panel-kicker">{"Frames"}</p>
-                                        // <h2>{"Timeline"}</h2>
-                                        <button
-                                            class="secondary icon-button control-icon"
-                                            onclick={on_toggle_playback}
-                                            disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
-                                            aria-label={if *playing { "Pause playback" } else { "Start playback" }}
-                                            title={if *playing { "Pause playback" } else { "Start playback" }}
-                                        >
-                                            {playback_icon}
-                                        </button>
-                                        <button
-                                            class="primary icon-button circle-btn"
-                                            onclick={to_mouse_cb(on_capture.clone())}
-                                            disabled={busy || snapshot.selected_camera.is_none()}
-                                            aria-label="Capture frame"
-                                            title="Capture frame"
-                                        >
-                                            {capture_icon}
-                                        </button>
-                                        <button
-                                            class="danger icon-button control-icon"
-                                            onclick={to_mouse_cb(on_delete.clone())}
-                                            disabled={busy || delete_target_frame_id.is_none()}
-                                            aria-label="Delete frame"
-                                            title="Delete frame"
-                                        >
-                                            {delete_icon}
-                                        </button>
-
-                                    // </div>
+                                    <button
+                                        class="secondary icon-button control-icon"
+                                        onclick={on_toggle_playback}
+                                        disabled={busy || current_project.as_ref().map(|project| project.frames.is_empty()).unwrap_or(true)}
+                                        aria-label={if *playing { "Pause playback" } else { "Start playback" }}
+                                        title={if *playing { "Pause playback" } else { "Start playback" }}
+                                    >
+                                        {playback_icon}
+                                    </button>
+                                    <button
+                                        class="primary icon-button circle-btn"
+                                        onclick={to_mouse_cb(on_capture.clone())}
+                                        disabled={busy || snapshot.selected_camera.is_none()}
+                                        aria-label="Capture frame"
+                                        title="Capture frame"
+                                    >
+                                        {capture_icon}
+                                    </button>
+                                    <button
+                                        class="danger icon-button control-icon"
+                                        onclick={to_mouse_cb(on_delete.clone())}
+                                        disabled={busy || delete_target_frame_id.is_none()}
+                                        aria-label="Delete frame"
+                                        title="Delete frame"
+                                    >
+                                        {delete_icon}
+                                    </button>
                                 </div>
                                 <div class="timeline-strip">
                                     {
@@ -1227,9 +1255,7 @@ pub fn app() -> Html {
                                                         disabled={busy || snapshot.selected_camera.is_none()}
                                                     >
                                                         <div class="timeline-live-thumb">{"Live"}</div>
-                                                        <center>
                                                         <span>{"Live Preview"}</span>
-                                                        </center>
                                                     </button>
                                                 </>
                                             }
@@ -1241,31 +1267,6 @@ pub fn app() -> Html {
                     }
                 } else {
                     html! {
-                    <div>
-
-            // <section class="status-strip">
-            //     <div class="status-pill">
-            //         // <span class="status-dot"></span>
-            //         // <div class="status-copy">
-            //             // <span class="status-kicker">{"System status"}</span>
-            //             // <strong>{status_phase_label(&snapshot.status)}</strong>
-            //             // <span>{status_line.clone()}</span>
-            //         // </div>
-            //     </div>
-            //     {
-            //         if let Some(project) = current_project.as_ref() {
-            //             html! {
-            //                 <div class="project-meta">
-            //                     <span title={project.project_path.clone()}>{project.project_path.clone()}</span>
-            //                     <span>{format!("{} FPS", project.fps)}</span>
-            //                     <span>{resolution_label.clone()}</span>
-            //                 </div>
-            //             }
-            //         } else {
-            //             html! {  }
-            //         }
-            //     }
-            // </section>
                         <section class="welcome-shell">
                             <div class="hero-card">
                                 <div class="hero-layout">
@@ -1273,19 +1274,11 @@ pub fn app() -> Html {
                                         <div class="maharani-frame">
                                             <img src="public/original.png" alt="Portrait of Maharani Jind Kaur" />
                                         </div>
-                                        // <figcaption>
-                                        //     <span class="maharani-label">{"Maharani Jind Kaur"}</span>
-                                        //     <span class="maharani-caption">
-                                        //         {"Queen of the Sikh Empire and the namesake behind Jind."}
-                                        //     </span>
-                                        // </figcaption>
                                     </figure>
                                     <div class="hero-copy-block">
-                                    // <div class="project-meta"><span>{"Written in rust"}</span></div>
                                         <p class="eyebrow">{"Release v0.1 Alpha"}</p>
                                         <h1>{"Jind stop motion"}</h1>
                                         <p class="hero-copy">
-                                            // {"Jind means \"life\" or \"soul\""}
                                             {"yes, its written in rust"}
                                         </p>
                                         <div class="hero-actions">
@@ -1296,8 +1289,6 @@ pub fn app() -> Html {
                                 </div>
                             </div>
                         </section>
-                    </div>
-
                     }
                 }
             }
@@ -1484,14 +1475,6 @@ fn scroll_timeline_item_into_view(element_id: &str) {
     let container_width = parent.client_width();
     let centered_left = target_left - ((container_width - target_width) / 2);
     parent.set_scroll_left(centered_left.max(0));
-}
-
-fn status_phase_label(status: &OperationStatusView) -> &'static str {
-    match status.phase.as_str() {
-        "cleaning-up" => "Cleaning up",
-        "busy" => "Working",
-        _ => "Ready",
-    }
 }
 
 fn first_camera_selection(cameras: &[CameraDeviceView]) -> Option<SelectCameraArg> {
