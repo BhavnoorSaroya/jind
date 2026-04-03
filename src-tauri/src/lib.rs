@@ -1065,7 +1065,7 @@ fn camera_mode_sort_key(left: &CameraMode, right: &CameraMode) -> std::cmp::Orde
 fn mode_rank(mode: &CameraMode) -> u8 {
     match (mode.width, mode.height) {
         (DEFAULT_CAMERA_WIDTH, DEFAULT_CAMERA_HEIGHT) => 5,
-        (1920, 1080) => 4,
+        // (1920, 1080) => 4, // commented cuz i made 1920 x 1080 the defaul
         (1024, 768) => 3,
         (800, 600) => 2,
         _ => 1,

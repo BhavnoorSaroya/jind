@@ -710,7 +710,7 @@ pub fn app() -> Html {
                             if !keyboard_busy {
                                 on_delete.emit(());
                             }
-                        } else if event.key() == "ArrowLeft" {
+                        } else if event.key() == "," {
                             event.prevent_default();
 
                             if !keyboard_busy {
@@ -721,7 +721,7 @@ pub fn app() -> Html {
                                 }
                                 on_select_adjacent_frame.emit(-1);
                             }
-                        } else if event.key() == "ArrowRight" {
+                        } else if event.key() == "." {
                             event.prevent_default();
 
                             if !keyboard_busy {
